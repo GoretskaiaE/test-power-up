@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HR Dashboard</title>
+
+  <!-- Trello Power-Up SDK -->
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
+  <!-- Chart.js for the bar graph -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <style>
+    /* ── Reset & Base ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f4f5f7;
+      color: #172b4d;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #172b4d;
+    }
+    .header .subtitle {
+      font-size: 12px;
+      color: #6b778c;
+      margin-top: 2px;
+    }
+
+    /* ── Stat Cards Row ── */
+    .stats-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: white;
+      border-radius: 8px;
+      padding: 14px 18px;
+      flex: 1;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .stat-card .num {
+      font-size: 28px;
+      font-weight: 800;
+      color: #0052cc;
+      line-height: 1;
+    }
+    .stat-card .label {
+      font-size: 11px;
+      color: #6b778c;
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Chart Container ── */
+    .chart-card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .chart-card h2 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b778c;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+    .chart-wrapper {
+      position: relative;
+      height: 260px;
+    }
+
+    /* ── Loading / Error States ── */
+    .state-msg {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b778c;
+      font-size: 14px;
+    }
+    .state-msg .icon { font-size: 32px; margin-bottom: 10px; }
+
+    /* ── Job List (below chart) ── */
+    .job-list {
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .job-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+    }
+    .job-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .job-count {
+      font-weight: 700;
+      color: #0052cc;
+      background: #e8f0fe;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading" class="state-msg">
+  <div class="icon">⏳</div>
+  Loading candidates data...
+</div>
+
+<div id="app" style="display:none">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>Recruitment Overview</h1>
+      <div class="subtitle" id="board-name">Loading board...</div>
+    </div>
+  </div>
+
+  <!-- Stat Cards -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="num" id="total-candidates">—</div>
+      <div class="label">Total Candidates</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" id="total-jobs">—</div>
+      <div class="label">Open Jobs</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" id="avg-candidates">—</div>
+      <div class="label">Avg per Job</div>
+    </div>
+  </div>
+
+  <!-- Bar Chart -->
+  <div class="chart-card">
+    <h2>Candidates per Job</h2>
+    <div class="chart-wrapper">
+      <canvas id="myChart"></canvas>
+    </div>
+    <!-- Job list with counts below chart -->
+    <div class="job-list" id="job-list"></div>
+  </div>
+
+</div>
+
+<div id="error" class="state-msg" style="display:none">
+  <div class="icon">⚠️</div>
+  <div id="error-msg">Something went wrong.</div>
+</div>
+
+
+<script>
+/* ============================================
+   HR Dashboard — Dashboard Logic
+   
+   HOW IT WORKS:
+   1. Connects to the Trello board via SDK
+   2. Reads all cards from the "Candidates" list
+   3. Groups them by their label (= job name)
+   4. Draws a bar chart with Chart.js
+============================================ */
+
+// ── Configuration ──────────────────────────────────────────
+// IMPORTANT: Change this if your list has a different name!
+var CANDIDATES_LIST_NAME = 'Candidates';
+// ───────────────────────────────────────────────────────────
+
+var t = window.TrelloPowerUp.iframe();
+
+// Colour palette for bars (cycles if more jobs than colours)
+var COLOURS = [
+  '#0052cc', '#00875a', '#ff5630', '#ff8b00',
+  '#6554c0', '#00b8d9', '#36b37e', '#ff7452'
+];
+
+// ── Helper: show error ──────────────────────────────────────
+function showError(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display    = 'none';
+  document.getElementById('error').style.display  = 'block';
+  document.getElementById('error-msg').textContent = msg;
+}
+
+// ── Main ───────────────────────────────────────────────────
+t.render(function() {
+
+  // Get board name + all lists + all cards in one go
+  Promise.all([
+    t.board('name'),
+    t.lists('id', 'name'),
+    t.cards('id', 'name', 'labels', 'idList')
+  ])
+  .then(function(results) {
+
+    var board   = results[0];
+    var lists   = results[1];
+    var allCards = results[2];
+
+    // Update board name in subtitle
+    document.getElementById('board-name').textContent = board.name;
+
+    // Find the "Candidates" list
+    var candidatesList = lists.find(function(l) {
+      return l.name.toLowerCase() === CANDIDATES_LIST_NAME.toLowerCase();
+    });
+
+    if (!candidatesList) {
+      showError(
+        'Could not find a list named "' + CANDIDATES_LIST_NAME + '".\n' +
+        'Please update CANDIDATES_LIST_NAME in dashboard.html.'
+      );
+      return;
+    }
+
+    // Filter cards that belong to Candidates list
+    var candidateCards = allCards.filter(function(c) {
+      return c.idList === candidatesList.id;
+    });
+
+    // ── Count candidates per job label ────────────────────
+    // Each candidate card has one or more labels = job name(s)
+    var jobCounts = {}; // { "Job test 57": 3, "Job test 58": 2, ... }
+
+    candidateCards.forEach(function(card) {
+      if (card.labels && card.labels.length > 0) {
+        card.labels.forEach(function(label) {
+          var name = label.name || ('(no name - ' + label.color + ')');
+          jobCounts[name] = (jobCounts[name] || 0) + 1;
+        });
+      } else {
+        // Candidate has no label - count as "Unassigned"
+        jobCounts['Unassigned'] = (jobCounts['Unassigned'] || 0) + 1;
+      }
+    });
+
+    var jobNames  = Object.keys(jobCounts);
+    var jobValues = jobNames.map(function(n) { return jobCounts[n]; });
+
+    // ── Summary stats ─────────────────────────────────────
+    var total = candidateCards.length;
+    var numJobs = jobNames.length;
+    var avg = numJobs > 0 ? (total / numJobs).toFixed(1) : 0;
+
+    document.getElementById('total-candidates').textContent = total;
+    document.getElementById('total-jobs').textContent       = numJobs;
+    document.getElementById('avg-candidates').textContent   = avg;
+
+    // ── Build colour array ────────────────────────────────
+    var barColours = jobNames.map(function(_, i) {
+      return COLOURS[i % COLOURS.length];
+    });
+
+    // ── Draw bar chart ────────────────────────────────────
+    var ctx = document.getElementById('myChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: jobNames,
+        datasets: [{
+          label: 'Candidates',
+          data: jobValues,
+          backgroundColor: barColours.map(function(c) { return c + 'cc'; }),
+          borderColor: barColours,
+          borderWidth: 2,
+          borderRadius: 6,
+          borderSkipped: false
+        }]
+      },
+      options: {
+        responsive:          true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                return ' ' + ctx.parsed.y + ' candidate' + (ctx.parsed.y !== 1 ? 's' : '');
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              stepSize: 1,
+              precision: 0
+            },
+            grid: {
+              color: '#f0f0f0'
+            }
+          },
+          x: {
+            grid: { display: false }
+          }
+        }
+      }
+    });
+
+    // ── Build text list below chart ────────────────────────
+    var listEl = document.getElementById('job-list');
+    jobNames.forEach(function(name, i) {
+      var row = document.createElement('div');
+      row.className = 'job-row';
+      row.innerHTML =
+        '<div class="job-name">' +
+          '<div class="color-dot" style="background:' + barColours[i] + '"></div>' +
+          '<span>' + name + '</span>' +
+        '</div>' +
+        '<span class="job-count">' + jobCounts[name] + '</span>';
+      listEl.appendChild(row);
+    });
+
+    // ── Show app ──────────────────────────────────────────
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display     = 'block';
+
+    // Resize modal to fit content
+    t.sizeTo('#app').catch(function() {});
+  })
+  .catch(function(err) {
+    showError('Error loading board data: ' + err.message);
+  });
+
+});
+</script>
+
+</body>
+</html>
