@@ -37,7 +37,10 @@
       }];
     },
 
-    // ── Auth status: lets Trello know if the user has authorized ──
+    // ── Authorization status ─────────────────────────────────
+    // Tells Trello if the current user is already authorized.
+    // If { authorized: false }, Trello shows an "Authorize Account"
+    // prompt in the Power-Up gear menu → triggers show-authorization.
     'authorization-status': function(t, options) {
       return t.getRestApi().then(function(restApi) {
         return restApi.isAuthorized().then(function(isAuthorized) {
@@ -46,13 +49,14 @@
       });
     },
 
-    // ── Show authorization: opens the auth popup ─────────────
+    // ── Show authorization ───────────────────────────────────
+    // Called when user clicks "Authorize Account".
+    // Opens a popup pointing to authorize.html (URL set here in code).
     'show-authorization': function(t, options) {
-      return t.getRestApi().then(function(restApi) {
-        return restApi.authorize({
-          scope:      'read,write',
-          expiration: 'never'
-        });
+      return t.popup({
+        title:  'Authorize HR Dashboard',
+        url:    BASE_URL + 'authorize.html',
+        height: 220,
       });
     },
 
