@@ -41,6 +41,12 @@
 
     /* ── Dashboard Switcher Dropdown ── */
     .switcher-wrap { flex-shrink: 0; }
+    .switcher-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+    }
     .switcher {
       appearance: none;
       -webkit-appearance: none;
@@ -165,12 +171,20 @@
       <div class="subtitle" id="board-name">Loading board...</div>
     </div>
     <div class="switcher-wrap">
-      <select class="switcher" id="dashboard-switcher">
-        <option value="by-job">Candidates per Job</option>
-        <option value="by-stage">Candidates per Stage</option>
-        <option value="by-job-and-stage">Candidates per Job and Stage</option>
-        <option value="by-member-and-stage">Candidates per Member and Stage</option>
-      </select>
+      <div class="switcher-row">
+        <select class="switcher" id="job-type-switcher">
+          <option value="open">Open Jobs</option>
+          <option value="closed">Closed Jobs</option>
+          <option value="unassigned">Unassigned Candidates</option>
+          <option value="all">All Job Types</option>
+        </select>
+        <select class="switcher" id="dashboard-switcher">
+          <option value="by-job">Candidates per Job</option>
+          <option value="by-stage">Candidates per Stage</option>
+          <option value="by-job-and-stage">Candidates per Job and Stage</option>
+          <option value="by-member-and-stage">Candidates per Member and Stage</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -209,11 +223,13 @@
 
 <script>
 /* ============================================
-   HR Dashboard v3
+   HR Dashboard v4
    Dashboards:
-   1. Candidates per Job   — groups cards by label
-   2. Candidates per Stage — groups cards by list name
-   All dashboards exclude: Clients, Open Jobs, Closed Jobs
+   1. Candidates per Job        — groups cards by label
+   2. Candidates per Stage      — groups cards by list name
+   3. Candidates per Job+Stage  — stacked bar by label × list
+   4. Candidates per Member+Stage — stacked bar by member × list
+   Job type filter applies to all dashboards.
 ============================================ */
 
 var EXCLUDED_LISTS = ['clients', 'open jobs', 'closed jobs'];
@@ -229,6 +245,44 @@ var t = window.TrelloPowerUp.iframe();
 // Holds fetched data so switcher doesn't re-fetch
 var appData = null;
 var chartInstance = null;
+
+// ── Filter candidate cards by job type selection ───────────────────
+// openLabelIds  = Set of label IDs found on cards in "Open Jobs" list
+// closedLabelIds = Set of label IDs found on cards in "Closed Jobs" list
+function filterCandidateCards(jobType) {
+  var all = appData.allCandidateCards;
+
+  if (jobType === 'all') return all;
+
+  if (jobType === 'open') {
+    return all.filter(function(card) {
+      return card.labels && card.labels.some(function(l) {
+        return appData.openLabelIds.has(l.id);
+      });
+    });
+  }
+
+  if (jobType === 'closed') {
+    return all.filter(function(card) {
+      return card.labels && card.labels.some(function(l) {
+        return appData.closedLabelIds.has(l.id);
+      });
+    });
+  }
+
+  if (jobType === 'unassigned') {
+    // Cards that have NO label belonging to either open or closed jobs
+    var allJobLabelIds = new Set(
+      Array.from(appData.openLabelIds).concat(Array.from(appData.closedLabelIds))
+    );
+    return all.filter(function(card) {
+      if (!card.labels || card.labels.length === 0) return true;
+      return !card.labels.some(function(l) { return allJobLabelIds.has(l.id); });
+    });
+  }
+
+  return all;
+}
 
 function showError(msg) {
   document.getElementById('loading').style.display = 'none';
@@ -641,21 +695,27 @@ function renderStackedDashboard(config) {
 }
 
 
-function switchDashboard(view) {
+function switchDashboard(view, jobType) {
   if (!appData) return;
+  jobType = jobType || document.getElementById('job-type-switcher').value;
+  var cards = filterCandidateCards(jobType);
   if (view === 'by-job-and-stage') {
-    renderStackedDashboard(buildByJobAndStage(appData.candidateCards, appData.listsMap));
+    renderStackedDashboard(buildByJobAndStage(cards, appData.listsMap));
   } else if (view === 'by-member-and-stage') {
-    renderStackedDashboard(buildByMemberAndStage(appData.candidateCards, appData.listsMap));
+    renderStackedDashboard(buildByMemberAndStage(cards, appData.listsMap));
   } else if (view === 'by-stage') {
-    renderDashboard(buildByStage(appData.candidateCards, appData.listsMap));
+    renderDashboard(buildByStage(cards, appData.listsMap));
   } else {
-    renderDashboard(buildByJob(appData.candidateCards));
+    renderDashboard(buildByJob(cards));
   }
 }
 
 document.getElementById('dashboard-switcher').addEventListener('change', function() {
   switchDashboard(this.value);
+});
+
+document.getElementById('job-type-switcher').addEventListener('change', function() {
+  switchDashboard(document.getElementById('dashboard-switcher').value, this.value);
 });
 
 // ── Main ───────────────────────────────────────────────────────────
@@ -681,6 +741,30 @@ t.render(function() {
         .map(function(l) { return l.id; })
     );
 
+    // Find Open Jobs and Closed Jobs list IDs specifically
+    var openJobsList   = lists.find(function(l) { return l.name.trim().toLowerCase() === 'open jobs'; });
+    var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
+
+    // Collect label IDs from cards in Open Jobs list
+    var openLabelIds = new Set();
+    if (openJobsList) {
+      allCards
+        .filter(function(c) { return c.idList === openJobsList.id; })
+        .forEach(function(c) {
+          (c.labels || []).forEach(function(l) { openLabelIds.add(l.id); });
+        });
+    }
+
+    // Collect label IDs from cards in Closed Jobs list
+    var closedLabelIds = new Set();
+    if (closedJobsList) {
+      allCards
+        .filter(function(c) { return c.idList === closedJobsList.id; })
+        .forEach(function(c) {
+          (c.labels || []).forEach(function(l) { closedLabelIds.add(l.id); });
+        });
+    }
+
     // Build listsMap: id → name (for all non-excluded lists)
     var listsMap = {};
     lists.forEach(function(l) {
@@ -689,16 +773,21 @@ t.render(function() {
       }
     });
 
-    // Filter candidate cards
-    var candidateCards = allCards.filter(function(c) {
+    // All candidate cards (no job-type filter yet)
+    var allCandidateCards = allCards.filter(function(c) {
       return !excludedIds.has(c.idList);
     });
 
     // Store for switcher re-use
-    appData = { candidateCards: candidateCards, listsMap: listsMap };
+    appData = {
+      allCandidateCards: allCandidateCards,
+      listsMap:          listsMap,
+      openLabelIds:      openLabelIds,
+      closedLabelIds:    closedLabelIds
+    };
 
-    // Render default view
-    renderDashboard(buildByJob(candidateCards));
+    // Render default view: Open Jobs filter, Candidates per Job
+    renderDashboard(buildByJob(filterCandidateCards('open')));
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display     = 'block';
