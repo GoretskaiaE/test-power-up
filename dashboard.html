@@ -168,6 +168,7 @@
       <select class="switcher" id="dashboard-switcher">
         <option value="by-job">Candidates per Job</option>
         <option value="by-stage">Candidates per Stage</option>
+        <option value="by-job-and-stage">Candidates per Job and Stage</option>
       </select>
     </div>
   </div>
@@ -362,13 +363,156 @@ function buildByStage(candidateCards, listsMap) {
   };
 }
 
-// ── Switch handler ─────────────────────────────────────────────────
+// ── Dashboard: Candidates per Job and Stage (stacked bar) ─────────
+function buildByJobAndStage(candidateCards, listsMap) {
+  // Collect all job names and stage names in encounter order
+  var jobNames   = [];
+  var stageNames = [];
+  var jobSet     = {};
+  var stageSet   = {};
+
+  // First pass: collect unique jobs and stages
+  candidateCards.forEach(function(card) {
+    var stageName = listsMap[card.idList] || 'Unknown';
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+
+    var labels = (card.labels && card.labels.length > 0)
+      ? card.labels
+      : [{ name: 'Unassigned' }];
+
+    labels.forEach(function(label) {
+      var jobName = label.name || ('(no name - ' + label.color + ')');
+      if (!jobSet[jobName]) { jobSet[jobName] = true; jobNames.push(jobName); }
+    });
+  });
+
+  // Also include stages that have 0 cards (from listsMap)
+  Object.values(listsMap).forEach(function(stageName) {
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+  });
+
+  // Build counts: counts[jobName][stageName] = n
+  var counts = {};
+  jobNames.forEach(function(job) {
+    counts[job] = {};
+    stageNames.forEach(function(stage) { counts[job][stage] = 0; });
+  });
+
+  candidateCards.forEach(function(card) {
+    var stageName = listsMap[card.idList] || 'Unknown';
+    var labels = (card.labels && card.labels.length > 0)
+      ? card.labels
+      : [{ name: 'Unassigned' }];
+    labels.forEach(function(label) {
+      var jobName = label.name || ('(no name - ' + label.color + ')');
+      counts[jobName][stageName] = (counts[jobName][stageName] || 0) + 1;
+    });
+  });
+
+  return {
+    type:       'stacked',
+    title:      'Candidates per Job and Stage',
+    chartTitle: 'Candidates per Job and Stage',
+    totalCards: candidateCards.length,
+    jobNames:   jobNames,
+    stageNames: stageNames,
+    counts:     counts
+  };
+}
+
+// ── Render stacked bar chart ───────────────────────────────────────
+function renderStackedDashboard(config) {
+  document.getElementById('dashboard-title').textContent   = config.title;
+  document.getElementById('chart-title').textContent       = config.chartTitle;
+  document.getElementById('stat-groups-label').textContent = 'Jobs';
+  document.getElementById('stat-total').textContent        = config.totalCards;
+  document.getElementById('stat-groups').textContent       = config.jobNames.length;
+
+  var totalGroups = config.jobNames.length;
+  var avg = totalGroups > 0 ? (config.totalCards / totalGroups).toFixed(1) : 0;
+  document.getElementById('stat-avg').textContent = avg;
+
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+  // One dataset per stage
+  var datasets = config.stageNames.map(function(stage, i) {
+    var colour = COLOURS[i % COLOURS.length];
+    return {
+      label:           stage,
+      data:            config.jobNames.map(function(job) { return config.counts[job][stage] || 0; }),
+      backgroundColor: colour + 'cc',
+      borderColor:     colour,
+      borderWidth:     2,
+      borderRadius:    4,
+      borderSkipped:   false
+    };
+  });
+
+  var ctx = document.getElementById('myChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels:   config.jobNames,
+      datasets: datasets
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display:  true,
+          position: 'bottom',
+          labels:   { boxWidth: 12, font: { size: 11 } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ' ' + ctx.dataset.label + ': ' + ctx.parsed.y +
+                ' candidate' + (ctx.parsed.y !== 1 ? 's' : '');
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: { stepSize: 1, precision: 0 },
+          grid:  { color: '#f0f0f0' }
+        }
+      }
+    }
+  });
+
+  // Build legend list below chart: one row per job showing total
+  var listEl = document.getElementById('item-list');
+  listEl.innerHTML = '';
+  config.jobNames.forEach(function(job) {
+    var total = config.stageNames.reduce(function(sum, stage) {
+      return sum + (config.counts[job][stage] || 0);
+    }, 0);
+    var row = document.createElement('div');
+    row.className = 'item-row';
+    row.innerHTML =
+      '<div class="item-name"><span>' + job + '</span></div>' +
+      '<span class="item-count">' + total + '</span>';
+    listEl.appendChild(row);
+  });
+
+  t.sizeTo('#app').catch(function() {});
+}
+
+
 function switchDashboard(view) {
   if (!appData) return;
-  var config = view === 'by-stage'
-    ? buildByStage(appData.candidateCards, appData.listsMap)
-    : buildByJob(appData.candidateCards);
-  renderDashboard(config);
+  if (view === 'by-job-and-stage') {
+    renderStackedDashboard(buildByJobAndStage(appData.candidateCards, appData.listsMap));
+  } else if (view === 'by-stage') {
+    renderDashboard(buildByStage(appData.candidateCards, appData.listsMap));
+  } else {
+    renderDashboard(buildByJob(appData.candidateCards));
+  }
 }
 
 document.getElementById('dashboard-switcher').addEventListener('change', function() {
