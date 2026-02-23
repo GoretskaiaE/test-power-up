@@ -169,6 +169,7 @@
         <option value="by-job">Candidates per Job</option>
         <option value="by-stage">Candidates per Stage</option>
         <option value="by-job-and-stage">Candidates per Job and Stage</option>
+        <option value="by-member-and-stage">Candidates per Member and Stage</option>
       </select>
     </div>
   </div>
@@ -410,21 +411,79 @@ function buildByJobAndStage(candidateCards, listsMap) {
   });
 
   return {
-    type:       'stacked',
-    title:      'Candidates per Job and Stage',
-    chartTitle: 'Candidates per Job and Stage',
-    totalCards: candidateCards.length,
-    jobNames:   jobNames,
-    stageNames: stageNames,
-    counts:     counts
+    type:        'stacked',
+    title:       'Candidates per Job and Stage',
+    chartTitle:  'Candidates per Job and Stage',
+    totalCards:  candidateCards.length,
+    jobNames:    jobNames,
+    stageNames:  stageNames,
+    counts:      counts,
+    groupsLabel: 'Jobs'
   };
 }
 
-// ── Render stacked bar chart ───────────────────────────────────────
+// ── Dashboard: Candidates per Member and Stage (stacked bar) ──────
+function buildByMemberAndStage(candidateCards, listsMap) {
+  var memberNames = [];
+  var stageNames  = [];
+  var memberSet   = {};
+  var stageSet    = {};
+
+  // First pass: collect unique members and stages
+  candidateCards.forEach(function(card) {
+    var stageName = listsMap[card.idList] || 'Unknown';
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+
+    var members = (card.members && card.members.length > 0)
+      ? card.members
+      : [{ fullName: 'Unassigned' }];
+
+    members.forEach(function(m) {
+      var name = m.fullName || m.username || 'Unassigned';
+      if (!memberSet[name]) { memberSet[name] = true; memberNames.push(name); }
+    });
+  });
+
+  // Include all non-excluded stages even if 0 cards
+  Object.values(listsMap).forEach(function(stageName) {
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+  });
+
+  // Build counts matrix
+  var counts = {};
+  memberNames.forEach(function(member) {
+    counts[member] = {};
+    stageNames.forEach(function(stage) { counts[member][stage] = 0; });
+  });
+
+  candidateCards.forEach(function(card) {
+    var stageName = listsMap[card.idList] || 'Unknown';
+    var members = (card.members && card.members.length > 0)
+      ? card.members
+      : [{ fullName: 'Unassigned' }];
+    members.forEach(function(m) {
+      var name = m.fullName || m.username || 'Unassigned';
+      counts[name][stageName] = (counts[name][stageName] || 0) + 1;
+    });
+  });
+
+  return {
+    type:        'stacked',
+    title:       'Candidates per Member and Stage',
+    chartTitle:  'Candidates per Member and Stage',
+    totalCards:  candidateCards.length,
+    jobNames:    memberNames,   // reuse jobNames key so renderStackedDashboard works as-is
+    stageNames:  stageNames,
+    counts:      counts,
+    groupsLabel: 'Members'
+  };
+}
+
+
 function renderStackedDashboard(config) {
   document.getElementById('dashboard-title').textContent   = config.title;
   document.getElementById('chart-title').textContent       = config.chartTitle;
-  document.getElementById('stat-groups-label').textContent = 'Jobs';
+  document.getElementById('stat-groups-label').textContent = config.groupsLabel || 'Jobs';
   document.getElementById('stat-total').textContent        = config.totalCards;
   document.getElementById('stat-groups').textContent       = config.jobNames.length;
 
@@ -586,6 +645,8 @@ function switchDashboard(view) {
   if (!appData) return;
   if (view === 'by-job-and-stage') {
     renderStackedDashboard(buildByJobAndStage(appData.candidateCards, appData.listsMap));
+  } else if (view === 'by-member-and-stage') {
+    renderStackedDashboard(buildByMemberAndStage(appData.candidateCards, appData.listsMap));
   } else if (view === 'by-stage') {
     renderDashboard(buildByStage(appData.candidateCards, appData.listsMap));
   } else {
@@ -602,7 +663,7 @@ t.render(function() {
   Promise.all([
     t.board('name'),
     t.lists('id', 'name'),
-    t.cards('id', 'name', 'labels', 'idList')
+    t.cards('id', 'name', 'labels', 'idList', 'members')
   ])
   .then(function(results) {
     var board    = results[0];
