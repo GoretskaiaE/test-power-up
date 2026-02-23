@@ -184,18 +184,17 @@
 <script>
 /* ============================================
    HR Dashboard — Dashboard Logic
-
+   
    HOW IT WORKS:
    1. Connects to the Trello board via SDK
-   2. Reads all cards from ALL lists except
-      "Clients", "Open Jobs", and "Closed Jobs"
+   2. Reads all cards from the "Candidates" list
    3. Groups them by their label (= job name)
    4. Draws a bar chart with Chart.js
 ============================================ */
 
 // ── Configuration ──────────────────────────────────────────
-// Lists to EXCLUDE from candidate counting (case-insensitive)
-var EXCLUDED_LISTS = ['clients', 'open jobs', 'closed jobs'];
+// IMPORTANT: Change this if your list has a different name!
+var CANDIDATES_LIST_NAME = 'Candidates';
 // ───────────────────────────────────────────────────────────
 
 var t = window.TrelloPowerUp.iframe();
@@ -225,30 +224,34 @@ t.render(function() {
   ])
   .then(function(results) {
 
-    var board    = results[0];
-    var lists    = results[1];
+    var board   = results[0];
+    var lists   = results[1];
     var allCards = results[2];
 
     // Update board name in subtitle
     document.getElementById('board-name').textContent = board.name;
 
-    // Build a Set of excluded list IDs (matched case-insensitively by name)
-    var excludedListIds = new Set(
-      lists
-        .filter(function(l) {
-          return EXCLUDED_LISTS.indexOf(l.name.trim().toLowerCase()) !== -1;
-        })
-        .map(function(l) { return l.id; })
-    );
+    // Find the "Candidates" list
+    var candidatesList = lists.find(function(l) {
+      return l.name.toLowerCase() === CANDIDATES_LIST_NAME.toLowerCase();
+    });
 
-    // Keep cards that do NOT belong to an excluded list
+    if (!candidatesList) {
+      showError(
+        'Could not find a list named "' + CANDIDATES_LIST_NAME + '".\n' +
+        'Please update CANDIDATES_LIST_NAME in dashboard.html.'
+      );
+      return;
+    }
+
+    // Filter cards that belong to Candidates list
     var candidateCards = allCards.filter(function(c) {
-      return !excludedListIds.has(c.idList);
+      return c.idList === candidatesList.id;
     });
 
     // ── Count candidates per job label ────────────────────
     // Each candidate card has one or more labels = job name(s)
-    var jobCounts = {}; // { "Job Title": 3, "Another Job": 2, ... }
+    var jobCounts = {}; // { "Job test 57": 3, "Job test 58": 2, ... }
 
     candidateCards.forEach(function(card) {
       if (card.labels && card.labels.length > 0) {
@@ -257,7 +260,7 @@ t.render(function() {
           jobCounts[name] = (jobCounts[name] || 0) + 1;
         });
       } else {
-        // Candidate has no label — count as "Unassigned"
+        // Candidate has no label - count as "Unassigned"
         jobCounts['Unassigned'] = (jobCounts['Unassigned'] || 0) + 1;
       }
     });
@@ -266,9 +269,9 @@ t.render(function() {
     var jobValues = jobNames.map(function(n) { return jobCounts[n]; });
 
     // ── Summary stats ─────────────────────────────────────
-    var total   = candidateCards.length;
+    var total = candidateCards.length;
     var numJobs = jobNames.length;
-    var avg     = numJobs > 0 ? (total / numJobs).toFixed(1) : 0;
+    var avg = numJobs > 0 ? (total / numJobs).toFixed(1) : 0;
 
     document.getElementById('total-candidates').textContent = total;
     document.getElementById('total-jobs').textContent       = numJobs;

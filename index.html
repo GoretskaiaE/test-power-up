@@ -15,101 +15,22 @@
 
   var BASE_URL = window.location.origin + window.location.pathname.replace('index.html', '');
 
-  // List names (case-insensitive)
-  var SOURCE_LIST = 'open jobs';
-  var DEST_LIST   = 'closed jobs';
-
   window.TrelloPowerUp.initialize({
 
-    // ── Board button: opens the HR Dashboard modal ──────────
+    // Adds a button to the top of the board
     'board-buttons': function(t, options) {
       return [{
         icon: BASE_URL + 'icon.svg',
         text: 'HR Dashboard',
         callback: function(t) {
           return t.modal({
-            title:      'Candidates per Job',
-            url:        BASE_URL + 'dashboard.html',
-            height:     520,
+            title:  'Candidates per Job v1',
+            url:    BASE_URL + 'dashboard.html',
+            height: 520,
             fullscreen: false
           });
         }
       }];
-    },
-
-    // ── Authorization status ─────────────────────────────────
-    // Tells Trello if the current user is already authorized.
-    // If { authorized: false }, Trello shows an "Authorize Account"
-    // prompt in the Power-Up gear menu → triggers show-authorization.
-    'authorization-status': function(t, options) {
-      return t.getRestApi().then(function(restApi) {
-        return restApi.isAuthorized().then(function(isAuthorized) {
-          return { authorized: isAuthorized };
-        });
-      });
-    },
-
-    // ── Show authorization ───────────────────────────────────
-    // Called when user clicks "Authorize Account".
-    // Opens a popup pointing to authorize.html (URL set here in code).
-    'show-authorization': function(t, options) {
-      return t.popup({
-        title:  'Authorize HR Dashboard',
-        url:    BASE_URL + 'authorize.html',
-        height: 220,
-      });
-    },
-
-    // ── Card move automation ──────────────────────────────────
-    // Fires whenever any card is moved to a new list.
-    // When a card moves from "Open Jobs" → "Closed Jobs":
-    //   1. Grab its labels
-    //   2. Delete each label from the board via REST API
-    'card-move': function(t, options) {
-
-      var destName = (options.list.name || '').trim().toLowerCase();
-
-      // Only act when the card lands in "Closed Jobs"
-      if (destName !== DEST_LIST) {
-        return;
-      }
-
-      var labels = options.card.labels || [];
-
-      // Nothing to do if the card has no labels
-      if (labels.length === 0) {
-        return;
-      }
-
-      return t.getRestApi()
-        .then(function(restApi) {
-          return restApi.isAuthorized().then(function(isAuthorized) {
-
-            if (!isAuthorized) {
-              // Can't act without auth — surface a Trello notification
-              return t.alert({
-                message:  'HR Dashboard: please authorize the Power-Up to remove job labels automatically.',
-                duration: 8,
-                display:  'warning'
-              });
-            }
-
-            // Delete every label that was on the card from the board.
-            // Deleting a label via REST API removes it from ALL cards and the board.
-            var deletePromises = labels.map(function(label) {
-              return restApi.del('/1/labels/' + label.id)
-                .catch(function(err) {
-                  // Log per-label errors without killing the whole batch
-                  console.error('HR Dashboard: failed to delete label', label.id, err);
-                });
-            });
-
-            return Promise.all(deletePromises);
-          });
-        })
-        .catch(function(err) {
-          console.error('HR Dashboard: card-move error', err);
-        });
     }
 
   });
