@@ -5,13 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HR Dashboard</title>
 
-  <!-- Trello Power-Up SDK -->
   <script src="https://p.trellocdn.com/power-up.min.js"></script>
-  <!-- Chart.js for the bar graph -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
   <style>
-    /* ── Reset & Base ── */
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -28,17 +25,39 @@
       align-items: center;
       justify-content: space-between;
       margin-bottom: 20px;
+      gap: 12px;
     }
-    .header h1 {
+    .header-left { flex: 1; }
+    .header-left h1 {
       font-size: 18px;
       font-weight: 700;
       color: #172b4d;
     }
-    .header .subtitle {
+    .header-left .subtitle {
       font-size: 12px;
       color: #6b778c;
       margin-top: 2px;
     }
+
+    /* ── Dashboard Switcher Dropdown ── */
+    .switcher-wrap { flex-shrink: 0; }
+    .switcher {
+      appearance: none;
+      -webkit-appearance: none;
+      background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b778c'/%3E%3C/svg%3E") no-repeat right 10px center;
+      border: 1px solid #dfe1e6;
+      border-radius: 6px;
+      padding: 7px 30px 7px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #172b4d;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+      transition: border-color 0.15s;
+      min-width: 190px;
+    }
+    .switcher:hover { border-color: #0052cc; }
+    .switcher:focus { outline: none; border-color: #0052cc; box-shadow: 0 0 0 2px rgba(0,82,204,0.2); }
 
     /* ── Stat Cards Row ── */
     .stats-row {
@@ -67,7 +86,7 @@
       letter-spacing: 0.5px;
     }
 
-    /* ── Chart Container ── */
+    /* ── Chart Card ── */
     .chart-card {
       background: white;
       border-radius: 8px;
@@ -87,7 +106,7 @@
       height: 260px;
     }
 
-    /* ── Loading / Error States ── */
+    /* ── Loading / Error ── */
     .state-msg {
       text-align: center;
       padding: 60px 20px;
@@ -96,20 +115,20 @@
     }
     .state-msg .icon { font-size: 32px; margin-bottom: 10px; }
 
-    /* ── Job List (below chart) ── */
-    .job-list {
+    /* ── Item List (below chart) ── */
+    .item-list {
       margin-top: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
-    .job-row {
+    .item-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       font-size: 13px;
     }
-    .job-name {
+    .item-name {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -120,7 +139,7 @@
       border-radius: 50%;
       flex-shrink: 0;
     }
-    .job-count {
+    .item-count {
       font-weight: 700;
       color: #0052cc;
       background: #e8f0fe;
@@ -134,43 +153,48 @@
 
 <div id="loading" class="state-msg">
   <div class="icon">⏳</div>
-  Loading candidates data...
+  Loading data...
 </div>
 
 <div id="app" style="display:none">
 
   <!-- Header -->
   <div class="header">
-    <div>
-      <h1>Recruitment Overview</h1>
+    <div class="header-left">
+      <h1 id="dashboard-title">Recruitment Overview</h1>
       <div class="subtitle" id="board-name">Loading board...</div>
+    </div>
+    <div class="switcher-wrap">
+      <select class="switcher" id="dashboard-switcher">
+        <option value="by-job">Candidates per Job</option>
+        <option value="by-stage">Candidates per Stage</option>
+      </select>
     </div>
   </div>
 
   <!-- Stat Cards -->
   <div class="stats-row">
     <div class="stat-card">
-      <div class="num" id="total-candidates">—</div>
+      <div class="num" id="stat-total">—</div>
       <div class="label">Total Candidates</div>
     </div>
     <div class="stat-card">
-      <div class="num" id="total-jobs">—</div>
-      <div class="label">Open Jobs</div>
+      <div class="num" id="stat-groups">—</div>
+      <div class="label" id="stat-groups-label">Groups</div>
     </div>
     <div class="stat-card">
-      <div class="num" id="avg-candidates">—</div>
-      <div class="label">Avg per Job</div>
+      <div class="num" id="stat-avg">—</div>
+      <div class="label">Avg per Group</div>
     </div>
   </div>
 
   <!-- Bar Chart -->
   <div class="chart-card">
-    <h2>Candidates per Job</h2>
+    <h2 id="chart-title">Chart</h2>
     <div class="chart-wrapper">
       <canvas id="myChart"></canvas>
     </div>
-    <!-- Job list with counts below chart -->
-    <div class="job-list" id="job-list"></div>
+    <div class="item-list" id="item-list"></div>
   </div>
 
 </div>
@@ -183,57 +207,186 @@
 
 <script>
 /* ============================================
-   HR Dashboard — Dashboard Logic
-
-   HOW IT WORKS:
-   1. Connects to the Trello board via SDK
-   2. Reads all cards from ALL lists except
-      "Clients", "Open Jobs", and "Closed Jobs"
-   3. Groups them by their label (= job name)
-   4. Draws a bar chart with Chart.js
+   HR Dashboard v3
+   Dashboards:
+   1. Candidates per Job   — groups cards by label
+   2. Candidates per Stage — groups cards by list name
+   All dashboards exclude: Clients, Open Jobs, Closed Jobs
 ============================================ */
 
-// ── Configuration ──────────────────────────────────────────
-// Lists to EXCLUDE from candidate counting (case-insensitive)
 var EXCLUDED_LISTS = ['clients', 'open jobs', 'closed jobs'];
-// ───────────────────────────────────────────────────────────
+
+var COLOURS = [
+  '#0052cc', '#00875a', '#ff5630', '#ff8b00',
+  '#6554c0', '#00b8d9', '#36b37e', '#ff7452',
+  '#172b4d', '#97a0af'
+];
 
 var t = window.TrelloPowerUp.iframe();
 
-// Colour palette for bars (cycles if more jobs than colours)
-var COLOURS = [
-  '#0052cc', '#00875a', '#ff5630', '#ff8b00',
-  '#6554c0', '#00b8d9', '#36b37e', '#ff7452'
-];
+// Holds fetched data so switcher doesn't re-fetch
+var appData = null;
+var chartInstance = null;
 
-// ── Helper: show error ──────────────────────────────────────
 function showError(msg) {
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('app').style.display    = 'none';
-  document.getElementById('error').style.display  = 'block';
-  document.getElementById('error-msg').textContent = msg;
+  document.getElementById('app').style.display     = 'none';
+  document.getElementById('error').style.display   = 'block';
+  document.getElementById('error-msg').textContent  = msg;
 }
 
-// ── Main ───────────────────────────────────────────────────
-t.render(function() {
+// ── Render a dashboard view given a groups object { name: count } ──
+function renderDashboard(config) {
+  var groupNames  = Object.keys(config.groups);
+  var groupValues = groupNames.map(function(n) { return config.groups[n]; });
+  var total       = config.totalCards;
+  var numGroups   = groupNames.length;
+  var avg         = numGroups > 0 ? (total / numGroups).toFixed(1) : 0;
 
-  // Get board name + all lists + all cards in one go
+  // Stats
+  document.getElementById('dashboard-title').textContent   = config.title;
+  document.getElementById('chart-title').textContent       = config.chartTitle;
+  document.getElementById('stat-groups-label').textContent = config.groupsLabel;
+  document.getElementById('stat-total').textContent        = total;
+  document.getElementById('stat-groups').textContent       = numGroups;
+  document.getElementById('stat-avg').textContent          = avg;
+
+  // Colours
+  var barColours = groupNames.map(function(_, i) {
+    return COLOURS[i % COLOURS.length];
+  });
+
+  // Destroy previous chart if exists
+  if (chartInstance) {
+    chartInstance.destroy();
+    chartInstance = null;
+  }
+
+  // Draw chart
+  var ctx = document.getElementById('myChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: groupNames,
+      datasets: [{
+        label: 'Candidates',
+        data: groupValues,
+        backgroundColor: barColours.map(function(c) { return c + 'cc'; }),
+        borderColor: barColours,
+        borderWidth: 2,
+        borderRadius: 6,
+        borderSkipped: false
+      }]
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ' ' + ctx.parsed.y + ' candidate' + (ctx.parsed.y !== 1 ? 's' : '');
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { stepSize: 1, precision: 0 },
+          grid: { color: '#f0f0f0' }
+        },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  // Build list below chart
+  var listEl = document.getElementById('item-list');
+  listEl.innerHTML = '';
+  groupNames.forEach(function(name, i) {
+    var row = document.createElement('div');
+    row.className = 'item-row';
+    row.innerHTML =
+      '<div class="item-name">' +
+        '<div class="color-dot" style="background:' + barColours[i] + '"></div>' +
+        '<span>' + name + '</span>' +
+      '</div>' +
+      '<span class="item-count">' + config.groups[name] + '</span>';
+    listEl.appendChild(row);
+  });
+
+  t.sizeTo('#app').catch(function() {});
+}
+
+// ── Dashboard: Candidates per Job (grouped by label) ──────────────
+function buildByJob(candidateCards) {
+  var groups = {};
+  candidateCards.forEach(function(card) {
+    if (card.labels && card.labels.length > 0) {
+      card.labels.forEach(function(label) {
+        var name = label.name || ('(no name - ' + label.color + ')');
+        groups[name] = (groups[name] || 0) + 1;
+      });
+    } else {
+      groups['Unassigned'] = (groups['Unassigned'] || 0) + 1;
+    }
+  });
+  return {
+    title:       'Candidates per Job',
+    chartTitle:  'Candidates per Job',
+    groupsLabel: 'Open Jobs',
+    totalCards:  candidateCards.length,
+    groups:      groups
+  };
+}
+
+// ── Dashboard: Candidates per Stage (grouped by list name) ────────
+function buildByStage(candidateCards, listsMap) {
+  var groups = {};
+  candidateCards.forEach(function(card) {
+    var listName = listsMap[card.idList] || 'Unknown';
+    groups[listName] = (groups[listName] || 0) + 1;
+  });
+  return {
+    title:       'Candidates per Stage',
+    chartTitle:  'Candidates per Stage',
+    groupsLabel: 'Stages',
+    totalCards:  candidateCards.length,
+    groups:      groups
+  };
+}
+
+// ── Switch handler ─────────────────────────────────────────────────
+function switchDashboard(view) {
+  if (!appData) return;
+  var config = view === 'by-stage'
+    ? buildByStage(appData.candidateCards, appData.listsMap)
+    : buildByJob(appData.candidateCards);
+  renderDashboard(config);
+}
+
+document.getElementById('dashboard-switcher').addEventListener('change', function() {
+  switchDashboard(this.value);
+});
+
+// ── Main ───────────────────────────────────────────────────────────
+t.render(function() {
   Promise.all([
     t.board('name'),
     t.lists('id', 'name'),
     t.cards('id', 'name', 'labels', 'idList')
   ])
   .then(function(results) {
-
     var board    = results[0];
     var lists    = results[1];
     var allCards = results[2];
 
-    // Update board name in subtitle
     document.getElementById('board-name').textContent = board.name;
 
-    // Build a Set of excluded list IDs (matched case-insensitively by name)
-    var excludedListIds = new Set(
+    // Build excluded list ID set
+    var excludedIds = new Set(
       lists
         .filter(function(l) {
           return EXCLUDED_LISTS.indexOf(l.name.trim().toLowerCase()) !== -1;
@@ -241,116 +394,32 @@ t.render(function() {
         .map(function(l) { return l.id; })
     );
 
-    // Keep cards that do NOT belong to an excluded list
+    // Build listsMap: id → name (for all non-excluded lists)
+    var listsMap = {};
+    lists.forEach(function(l) {
+      if (!excludedIds.has(l.id)) {
+        listsMap[l.id] = l.name;
+      }
+    });
+
+    // Filter candidate cards
     var candidateCards = allCards.filter(function(c) {
-      return !excludedListIds.has(c.idList);
+      return !excludedIds.has(c.idList);
     });
 
-    // ── Count candidates per job label ────────────────────
-    // Each candidate card has one or more labels = job name(s)
-    var jobCounts = {}; // { "Job Title": 3, "Another Job": 2, ... }
+    // Store for switcher re-use
+    appData = { candidateCards: candidateCards, listsMap: listsMap };
 
-    candidateCards.forEach(function(card) {
-      if (card.labels && card.labels.length > 0) {
-        card.labels.forEach(function(label) {
-          var name = label.name || ('(no name - ' + label.color + ')');
-          jobCounts[name] = (jobCounts[name] || 0) + 1;
-        });
-      } else {
-        // Candidate has no label — count as "Unassigned"
-        jobCounts['Unassigned'] = (jobCounts['Unassigned'] || 0) + 1;
-      }
-    });
+    // Render default view
+    renderDashboard(buildByJob(candidateCards));
 
-    var jobNames  = Object.keys(jobCounts);
-    var jobValues = jobNames.map(function(n) { return jobCounts[n]; });
-
-    // ── Summary stats ─────────────────────────────────────
-    var total   = candidateCards.length;
-    var numJobs = jobNames.length;
-    var avg     = numJobs > 0 ? (total / numJobs).toFixed(1) : 0;
-
-    document.getElementById('total-candidates').textContent = total;
-    document.getElementById('total-jobs').textContent       = numJobs;
-    document.getElementById('avg-candidates').textContent   = avg;
-
-    // ── Build colour array ────────────────────────────────
-    var barColours = jobNames.map(function(_, i) {
-      return COLOURS[i % COLOURS.length];
-    });
-
-    // ── Draw bar chart ────────────────────────────────────
-    var ctx = document.getElementById('myChart').getContext('2d');
-    new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: jobNames,
-        datasets: [{
-          label: 'Candidates',
-          data: jobValues,
-          backgroundColor: barColours.map(function(c) { return c + 'cc'; }),
-          borderColor: barColours,
-          borderWidth: 2,
-          borderRadius: 6,
-          borderSkipped: false
-        }]
-      },
-      options: {
-        responsive:          true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function(ctx) {
-                return ' ' + ctx.parsed.y + ' candidate' + (ctx.parsed.y !== 1 ? 's' : '');
-              }
-            }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: {
-              stepSize: 1,
-              precision: 0
-            },
-            grid: {
-              color: '#f0f0f0'
-            }
-          },
-          x: {
-            grid: { display: false }
-          }
-        }
-      }
-    });
-
-    // ── Build text list below chart ────────────────────────
-    var listEl = document.getElementById('job-list');
-    jobNames.forEach(function(name, i) {
-      var row = document.createElement('div');
-      row.className = 'job-row';
-      row.innerHTML =
-        '<div class="job-name">' +
-          '<div class="color-dot" style="background:' + barColours[i] + '"></div>' +
-          '<span>' + name + '</span>' +
-        '</div>' +
-        '<span class="job-count">' + jobCounts[name] + '</span>';
-      listEl.appendChild(row);
-    });
-
-    // ── Show app ──────────────────────────────────────────
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display     = 'block';
-
-    // Resize modal to fit content
     t.sizeTo('#app').catch(function() {});
   })
   .catch(function(err) {
     showError('Error loading board data: ' + err.message);
   });
-
 });
 </script>
 
