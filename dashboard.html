@@ -344,7 +344,11 @@ function buildByJob(candidateCards) {
 
 // ── Dashboard: Candidates per Stage (grouped by list name) ────────
 function buildByStage(candidateCards, listsMap) {
+  // Pre-initialise every non-excluded list to 0 so empty lists still appear
   var groups = {};
+  Object.keys(listsMap).forEach(function(id) {
+    groups[listsMap[id]] = 0;
+  });
   candidateCards.forEach(function(card) {
     var listName = listsMap[card.idList] || 'Unknown';
     groups[listName] = (groups[listName] || 0) + 1;
