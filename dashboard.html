@@ -443,7 +443,7 @@ function renderStackedDashboard(config) {
       backgroundColor: colour + 'cc',
       borderColor:     colour,
       borderWidth:     2,
-      borderRadius:    4,
+      borderRadius:    0,
       borderSkipped:   false
     };
   });
@@ -485,20 +485,98 @@ function renderStackedDashboard(config) {
     }
   });
 
-  // Build legend list below chart: one row per job showing total
+  // Build legend table: jobs as rows, stages as columns
   var listEl = document.getElementById('item-list');
   listEl.innerHTML = '';
-  config.jobNames.forEach(function(job) {
-    var total = config.stageNames.reduce(function(sum, stage) {
+
+  var table = document.createElement('table');
+  table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;';
+
+  // Header row: empty corner + one column per stage
+  var thead = document.createElement('thead');
+  var headRow = document.createElement('tr');
+
+  var cornerTh = document.createElement('th');
+  cornerTh.style.cssText = 'text-align:left;padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;white-space:nowrap;';
+  cornerTh.textContent = 'Job / Stage';
+  headRow.appendChild(cornerTh);
+
+  config.stageNames.forEach(function(stage, i) {
+    var th = document.createElement('th');
+    var colour = COLOURS[i % COLOURS.length];
+    th.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:2px solid ' + colour + ';color:' + colour + ';font-weight:600;white-space:nowrap;';
+    th.textContent = stage;
+    headRow.appendChild(th);
+  });
+
+  // Total column header
+  var totalTh = document.createElement('th');
+  totalTh.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:2px solid #172b4d;color:#172b4d;font-weight:600;';
+  totalTh.textContent = 'Total';
+  headRow.appendChild(totalTh);
+
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  // Body rows: one per job
+  var tbody = document.createElement('tbody');
+  config.jobNames.forEach(function(job, rowIdx) {
+    var tr = document.createElement('tr');
+    tr.style.background = rowIdx % 2 === 0 ? '#f8f9fc' : '#ffffff';
+
+    var jobTd = document.createElement('td');
+    jobTd.style.cssText = 'padding:6px 8px;font-weight:600;color:#172b4d;white-space:nowrap;border-bottom:1px solid #f0f0f0;';
+    jobTd.textContent = job;
+    tr.appendChild(jobTd);
+
+    var jobTotal = 0;
+    config.stageNames.forEach(function(stage, i) {
+      var count = config.counts[job][stage] || 0;
+      jobTotal += count;
+      var td = document.createElement('td');
+      td.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;color:' + (count > 0 ? '#172b4d' : '#c1c7d0') + ';';
+      td.textContent = count > 0 ? count : '—';
+      tr.appendChild(td);
+    });
+
+    // Total cell
+    var totalTd = document.createElement('td');
+    totalTd.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-weight:700;color:#0052cc;background:#e8f0fe;';
+    totalTd.textContent = jobTotal;
+    tr.appendChild(totalTd);
+
+    tbody.appendChild(tr);
+  });
+
+  // Footer row: totals per stage
+  var footRow = document.createElement('tr');
+  footRow.style.background = '#f0f0f0';
+
+  var footLabelTd = document.createElement('td');
+  footLabelTd.style.cssText = 'padding:6px 8px;font-weight:700;color:#172b4d;border-top:2px solid #dfe1e6;';
+  footLabelTd.textContent = 'Total';
+  footRow.appendChild(footLabelTd);
+
+  var grandTotal = 0;
+  config.stageNames.forEach(function(stage) {
+    var stageTotal = config.jobNames.reduce(function(sum, job) {
       return sum + (config.counts[job][stage] || 0);
     }, 0);
-    var row = document.createElement('div');
-    row.className = 'item-row';
-    row.innerHTML =
-      '<div class="item-name"><span>' + job + '</span></div>' +
-      '<span class="item-count">' + total + '</span>';
-    listEl.appendChild(row);
+    grandTotal += stageTotal;
+    var td = document.createElement('td');
+    td.style.cssText = 'text-align:center;padding:6px 8px;font-weight:700;color:#172b4d;border-top:2px solid #dfe1e6;';
+    td.textContent = stageTotal;
+    footRow.appendChild(td);
   });
+
+  var grandTd = document.createElement('td');
+  grandTd.style.cssText = 'text-align:center;padding:6px 8px;font-weight:800;color:#0052cc;background:#e8f0fe;border-top:2px solid #dfe1e6;';
+  grandTd.textContent = grandTotal;
+  footRow.appendChild(grandTd);
+
+  tbody.appendChild(footRow);
+  table.appendChild(tbody);
+  listEl.appendChild(table);
 
   t.sizeTo('#app').catch(function() {});
 }
