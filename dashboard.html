@@ -420,13 +420,28 @@ function buildByStage(candidateCards, listsMap) {
 
 // ── Dashboard: Candidates per Job and Stage (stacked bar) ─────────
 function buildByJobAndStage(candidateCards, listsMap) {
-  // Collect all job names and stage names in encounter order
   var jobNames   = [];
   var stageNames = [];
   var jobSet     = {};
   var stageSet   = {};
 
-  // First pass: collect unique jobs and stages
+  // Pre-initialize all known job labels from Open+Closed Jobs lists
+  // so jobs with 0 matching candidates still appear
+  var jobType = document.getElementById('job-type-switcher').value;
+  var knownLabelIds = [];
+  if (jobType === 'open') {
+    knownLabelIds = Array.from(appData.openLabelIds);
+  } else if (jobType === 'closed') {
+    knownLabelIds = Array.from(appData.closedLabelIds);
+  } else if (jobType === 'all' || jobType === 'unassigned') {
+    knownLabelIds = Object.keys(appData.jobLabelNames);
+  }
+  knownLabelIds.forEach(function(id) {
+    var name = appData.jobLabelNames[id];
+    if (name && !jobSet[name]) { jobSet[name] = true; jobNames.push(name); }
+  });
+
+  // First pass: collect jobs and stages from actual cards
   candidateCards.forEach(function(card) {
     var stageName = listsMap[card.idList] || 'Unknown';
     if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
@@ -483,7 +498,13 @@ function buildByMemberAndStage(candidateCards, listsMap) {
   var memberSet   = {};
   var stageSet    = {};
 
-  // First pass: collect unique members and stages
+  // Pre-initialize all board members so those with 0 candidates still appear
+  (appData.boardMembers || []).forEach(function(m) {
+    var name = m.fullName || m.username || 'Unassigned';
+    if (!memberSet[name]) { memberSet[name] = true; memberNames.push(name); }
+  });
+
+  // First pass: collect stages and any members not on the board list
   candidateCards.forEach(function(card) {
     var stageName = listsMap[card.idList] || 'Unknown';
     if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
@@ -721,7 +742,7 @@ document.getElementById('job-type-switcher').addEventListener('change', function
 // ── Main ───────────────────────────────────────────────────────────
 t.render(function() {
   Promise.all([
-    t.board('name'),
+    t.board('name', 'members'),
     t.lists('id', 'name'),
     t.cards('id', 'name', 'labels', 'idList', 'members')
   ])
@@ -747,11 +768,15 @@ t.render(function() {
 
     // Collect label IDs from cards in Open Jobs list
     var openLabelIds = new Set();
+    var jobLabelNames = {}; // id → name for all labels on Open+Closed job cards
     if (openJobsList) {
       allCards
         .filter(function(c) { return c.idList === openJobsList.id; })
         .forEach(function(c) {
-          (c.labels || []).forEach(function(l) { openLabelIds.add(l.id); });
+          (c.labels || []).forEach(function(l) {
+            openLabelIds.add(l.id);
+            jobLabelNames[l.id] = l.name || ('(no name - ' + l.color + ')');
+          });
         });
     }
 
@@ -761,7 +786,10 @@ t.render(function() {
       allCards
         .filter(function(c) { return c.idList === closedJobsList.id; })
         .forEach(function(c) {
-          (c.labels || []).forEach(function(l) { closedLabelIds.add(l.id); });
+          (c.labels || []).forEach(function(l) {
+            closedLabelIds.add(l.id);
+            jobLabelNames[l.id] = l.name || ('(no name - ' + l.color + ')');
+          });
         });
     }
 
@@ -783,7 +811,9 @@ t.render(function() {
       allCandidateCards: allCandidateCards,
       listsMap:          listsMap,
       openLabelIds:      openLabelIds,
-      closedLabelIds:    closedLabelIds
+      closedLabelIds:    closedLabelIds,
+      jobLabelNames:     jobLabelNames,
+      boardMembers:      board.members || []
     };
 
     // Render default view: Open Jobs filter, Candidates per Job
