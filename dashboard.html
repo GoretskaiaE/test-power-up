@@ -379,6 +379,23 @@ function renderDashboard(config) {
 // ── Dashboard: Candidates per Job (grouped by label) ──────────────
 function buildByJob(candidateCards) {
   var groups = {};
+
+  // Pre-initialize all known job labels from Open+Closed Jobs lists
+  // so jobs with 0 matching candidates still appear
+  var jobType = document.getElementById('job-type-switcher').value;
+  var knownLabelIds = [];
+  if (jobType === 'open') {
+    knownLabelIds = Array.from(appData.openLabelIds);
+  } else if (jobType === 'closed') {
+    knownLabelIds = Array.from(appData.closedLabelIds);
+  } else {
+    knownLabelIds = Object.keys(appData.jobLabelNames);
+  }
+  knownLabelIds.forEach(function(id) {
+    var name = appData.jobLabelNames[id];
+    if (name) groups[name] = 0;
+  });
+
   candidateCards.forEach(function(card) {
     if (card.labels && card.labels.length > 0) {
       card.labels.forEach(function(label) {
