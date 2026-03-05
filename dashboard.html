@@ -1013,12 +1013,13 @@ t.render(function() {
 
       // getRestApi() only provides auth helpers — use getToken() + fetch() for actual calls
       return restApi.getToken().then(function(token) {
-        var key = '9a5ae11fbd8699d50f22dd0b21ace619';
+        var key  = '9a5ae11fbd8699d50f22dd0b21ace619';
         var base = 'https://api.trello.com';
-        var auth = '?key=' + key + '&token=' + token;
 
         function apiFetch(path) {
-          return fetch(base + path + auth).then(function(r) {
+          var sep = path.indexOf('?') === -1 ? '?' : '&';
+          var url = base + path + sep + 'key=' + key + '&token=' + token;
+          return fetch(url).then(function(r) {
             if (!r.ok) {
               return r.text().then(function(txt) {
                 throw new Error('Trello API ' + r.status + ': ' + txt);
