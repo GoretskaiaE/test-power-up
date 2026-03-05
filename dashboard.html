@@ -1011,10 +1011,20 @@ t.render(function() {
       appData.restApiAuthorized = isAuthorized;
       if (!isAuthorized) return;
 
-      return Promise.all([
-        restApi.get('/1/boards/' + board.id + '/customFields'),
-        restApi.get('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
-      ]).then(function(cfResults) {
+      // getRestApi() only provides auth helpers — use getToken() + fetch() for actual calls
+      return restApi.getToken().then(function(token) {
+        var key = '9a5ae11fbd8699d50f22dd0b21ace619';
+        var base = 'https://api.trello.com';
+        var auth = '?key=' + key + '&token=' + token;
+
+        function apiFetch(path) {
+          return fetch(base + path + auth).then(function(r) { return r.json(); });
+        }
+
+        return Promise.all([
+          apiFetch('/1/boards/' + board.id + '/customFields'),
+          apiFetch('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
+        ]).then(function(cfResults) {
         var fieldDefs = cfResults[0];
         var cfCards   = cfResults[1];
 
@@ -1058,6 +1068,7 @@ t.render(function() {
           renderHiredVsRemaining();
         }
       });
+      }); // end getToken
     }).catch(function(err) {
       console.warn('HR Dashboard: custom fields not loaded -', err);
     });
