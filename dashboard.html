@@ -260,29 +260,24 @@ var COLOUR_NO_LABEL   = '#97a0af'; // label exists but has no colour set
 var COLOUR_UNASSIGNED = '#c1c7d0'; // card has no label at all
 
 // ── Stripe pattern helper for Hired vs. Remaining chart ───────────
-// Returns a small canvas suitable for ctx.createPattern()
 function makeStripeCanvas(hexColor, direction) {
   var size = 8;
   var pc   = document.createElement('canvas');
   pc.width = size; pc.height = size;
   var cx   = pc.getContext('2d');
-  // White background
   cx.fillStyle = '#ffffff';
   cx.fillRect(0, 0, size, size);
-  // Stripe
   cx.strokeStyle = hexColor;
   cx.lineWidth   = 2.5;
   cx.beginPath();
   if (direction === 'fwd') {
-    // ╱ forward slash stripes
-    cx.moveTo(size,  0);    cx.lineTo(0,      size);
-    cx.moveTo(size*2, 0);   cx.lineTo(0,      size*2);
-    cx.moveTo(size, -size); cx.lineTo(-size,  size);
+    cx.moveTo(size,    0);     cx.lineTo(0,      size);
+    cx.moveTo(size*2,  0);     cx.lineTo(0,      size*2);
+    cx.moveTo(size,   -size);  cx.lineTo(-size,  size);
   } else {
-    // ╲ back slash stripes
-    cx.moveTo(0,     0);    cx.lineTo(size,   size);
-    cx.moveTo(-size, 0);    cx.lineTo(size,   size*2);
-    cx.moveTo(0,    -size); cx.lineTo(size*2, size);
+    cx.moveTo(0,      0);      cx.lineTo(size,   size);
+    cx.moveTo(-size,  0);      cx.lineTo(size,   size*2);
+    cx.moveTo(0,     -size);   cx.lineTo(size*2, size);
   }
   cx.stroke();
   return pc;
@@ -434,7 +429,6 @@ function buildByJob(candidateCards) {
   var groups      = {};
   var groupColors = {};
 
-  // Pre-initialize all known job labels from Open+Closed Jobs lists
   var jobType = document.getElementById('job-type-switcher').value;
   var knownLabelIds = [];
   if (jobType === 'open') {
@@ -797,11 +791,9 @@ function renderStackedDashboard(config) {
 }
 
 
-// ── Dashboard: Hired vs. Remaining ────────────────────────────────
+// ── Dashboard 5: Hired vs. Remaining ──────────────────────────────
 function renderHiredVsRemaining() {
   var jobType = document.getElementById('job-type-switcher').value;
-
-  // Resolve which label IDs are in scope for the current filter
   var knownLabelIds = [];
   if (jobType === 'open') {
     knownLabelIds = Array.from(appData.openLabelIds);
@@ -811,10 +803,9 @@ function renderHiredVsRemaining() {
     knownLabelIds = Object.keys(appData.jobLabelNames);
   }
 
-  // Build ordered job list with colours
-  var jobNames   = [];
-  var jobColors  = {};
-  var seen       = {};
+  var jobNames  = [];
+  var jobColors = {};
+  var seen      = {};
   knownLabelIds.forEach(function(id) {
     var name  = appData.jobLabelNames[id];
     var color = appData.jobLabelColors[id];
@@ -825,7 +816,6 @@ function renderHiredVsRemaining() {
     }
   });
 
-  // Update header stats
   document.getElementById('dashboard-title').textContent   = 'Hired vs. Remaining';
   document.getElementById('chart-title').textContent       = 'Hired vs. Remaining per Job';
   document.getElementById('stat-groups-label').textContent = 'Jobs';
@@ -833,7 +823,6 @@ function renderHiredVsRemaining() {
   document.getElementById('stat-avg').textContent          = '—';
   document.getElementById('stat-total').textContent        = '—';
 
-  // Show auth / loading message if custom fields not ready
   var listEl = document.getElementById('item-list');
   listEl.innerHTML = '';
 
@@ -855,31 +844,23 @@ function renderHiredVsRemaining() {
     return;
   }
 
-  var cfData = appData.customFieldData;
-
-  // Build dataset values
+  var cfData    = appData.customFieldData;
   var totals    = jobNames.map(function(n) { return cfData[n] ? (cfData[n].total     || 0) : 0; });
   var hired     = jobNames.map(function(n) { return cfData[n] ? (cfData[n].hired     || 0) : 0; });
   var remaining = jobNames.map(function(n) { return cfData[n] ? (cfData[n].remaining || 0) : 0; });
 
-  // Update total stat with sum of all Totals
   var grandTotal = totals.reduce(function(s, v) { return s + v; }, 0);
   document.getElementById('stat-total').textContent = grandTotal;
 
-  // Create stripe patterns per job
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   var chartCtx = document.getElementById('myChart').getContext('2d');
-
-  var totalBg = jobNames.map(function(n) { return jobColors[n]; });
 
   var hiredBg = jobNames.map(function(n) {
     return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'fwd'), 'repeat');
   });
-
   var remainingBg = jobNames.map(function(n) {
     return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'back'), 'repeat');
   });
-
   var borderColors = jobNames.map(function(n) { return jobColors[n]; });
 
   chartInstance = new Chart(chartCtx, {
@@ -887,86 +868,43 @@ function renderHiredVsRemaining() {
     data: {
       labels: jobNames,
       datasets: [
-        {
-          label:           'Total',
-          data:            totals,
-          backgroundColor: totalBg,
-          borderColor:     borderColors,
-          borderWidth:     2,
-          borderRadius:    4,
-          borderSkipped:   false
-        },
-        {
-          label:           'Hired',
-          data:            hired,
-          backgroundColor: hiredBg,
-          borderColor:     borderColors,
-          borderWidth:     2,
-          borderRadius:    4,
-          borderSkipped:   false
-        },
-        {
-          label:           'Remaining',
-          data:            remaining,
-          backgroundColor: remainingBg,
-          borderColor:     borderColors,
-          borderWidth:     2,
-          borderRadius:    4,
-          borderSkipped:   false
-        }
+        { label: 'Total',     data: totals,    backgroundColor: borderColors, borderColor: borderColors, borderWidth: 2, borderRadius: 4, borderSkipped: false },
+        { label: 'Hired',     data: hired,     backgroundColor: hiredBg,      borderColor: borderColors, borderWidth: 2, borderRadius: 4, borderSkipped: false },
+        { label: 'Remaining', data: remaining, backgroundColor: remainingBg,  borderColor: borderColors, borderWidth: 2, borderRadius: 4, borderSkipped: false }
       ]
     },
     options: {
-      responsive:          true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: {
-          display:  true,
-          position: 'bottom',
-          labels:   { boxWidth: 14, font: { size: 11 } }
-        },
-        tooltip: {
-          callbacks: {
-            label: function(ctx) {
-              return ' ' + ctx.dataset.label + ': ' + ctx.parsed.y;
-            }
-          }
-        }
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
+        tooltip: { callbacks: { label: function(ctx) { return ' ' + ctx.dataset.label + ': ' + ctx.parsed.y; } } }
       },
       scales: {
         x: { grid: { display: false } },
-        y: {
-          beginAtZero: true,
-          ticks:       { stepSize: 1, precision: 0 },
-          grid:        { color: '#f0f0f0' }
-        }
+        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 }, grid: { color: '#f0f0f0' } }
       }
     }
   });
 
-  // Summary table below chart
+  // Summary table
   var table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:16px;';
-
-  // Header
-  var thead   = document.createElement('thead');
+  var thead = document.createElement('thead');
   var headRow = document.createElement('tr');
-  [['Job', 'left'], ['Total', 'center'], ['Hired', 'center'], ['Remaining', 'center']].forEach(function(col) {
+  [['Job','left'],['Total','center'],['Hired','center'],['Remaining','center']].forEach(function(col) {
     var th = document.createElement('th');
-    th.style.cssText = 'text-align:' + col[1] + ';padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;white-space:nowrap;';
+    th.style.cssText = 'text-align:' + col[1] + ';padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;';
     th.textContent = col[0];
     headRow.appendChild(th);
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
-
   var tbody = document.createElement('tbody');
   jobNames.forEach(function(name, i) {
-    var tr  = document.createElement('tr');
+    var tr = document.createElement('tr');
     tr.style.background = i % 2 === 0 ? '#f8f9fc' : '#ffffff';
     var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
-
-    [[dot + name, 'left', true], [totals[i], 'center', false], [hired[i], 'center', false], [remaining[i], 'center', false]].forEach(function(cell) {
+    [[dot + name,'left',true],[totals[i],'center',false],[hired[i],'center',false],[remaining[i],'center',false]].forEach(function(cell) {
       var td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:' + cell[1] + ';';
       if (cell[2]) { td.innerHTML = cell[0]; } else { td.textContent = cell[0]; }
@@ -976,10 +914,8 @@ function renderHiredVsRemaining() {
   });
   table.appendChild(tbody);
   listEl.appendChild(table);
-
   t.sizeTo('#app').catch(function() {});
 }
-
 
 function switchDashboard(view, jobType) {
   if (!appData) return;
@@ -1022,24 +958,18 @@ t.render(function() {
 
     document.getElementById('board-name').textContent = board.name;
 
-    // Build excluded list ID set
     var excludedIds = new Set(
-      lists
-        .filter(function(l) {
-          return EXCLUDED_LISTS.indexOf(l.name.trim().toLowerCase()) !== -1;
-        })
-        .map(function(l) { return l.id; })
+      lists.filter(function(l) { return EXCLUDED_LISTS.indexOf(l.name.trim().toLowerCase()) !== -1; })
+           .map(function(l) { return l.id; })
     );
 
-    // Find Open Jobs and Closed Jobs list IDs specifically
     var openJobsList   = lists.find(function(l) { return l.name.trim().toLowerCase() === 'open jobs'; });
     var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
 
-    // Collect label IDs + names + colors from job list cards
     var openLabelIds   = new Set();
     var closedLabelIds = new Set();
-    var jobLabelNames  = {}; // id → name
-    var jobLabelColors = {}; // id → Trello color name
+    var jobLabelNames  = {};
+    var jobLabelColors = {};
 
     function collectLabels(card, targetSet) {
       (card.labels || []).forEach(function(l) {
@@ -1049,27 +979,14 @@ t.render(function() {
       });
     }
 
-    if (openJobsList) {
-      allCards.filter(function(c) { return c.idList === openJobsList.id; })
-        .forEach(function(c) { collectLabels(c, openLabelIds); });
-    }
-    if (closedJobsList) {
-      allCards.filter(function(c) { return c.idList === closedJobsList.id; })
-        .forEach(function(c) { collectLabels(c, closedLabelIds); });
-    }
+    if (openJobsList)   allCards.filter(function(c) { return c.idList === openJobsList.id; }).forEach(function(c) { collectLabels(c, openLabelIds); });
+    if (closedJobsList) allCards.filter(function(c) { return c.idList === closedJobsList.id; }).forEach(function(c) { collectLabels(c, closedLabelIds); });
 
-    // Build listsMap: id → name (for all non-excluded lists)
     var listsMap = {};
-    lists.forEach(function(l) {
-      if (!excludedIds.has(l.id)) listsMap[l.id] = l.name;
-    });
+    lists.forEach(function(l) { if (!excludedIds.has(l.id)) listsMap[l.id] = l.name; });
 
-    // All candidate cards (no job-type filter yet)
-    var allCandidateCards = allCards.filter(function(c) {
-      return !excludedIds.has(c.idList);
-    });
+    var allCandidateCards = allCards.filter(function(c) { return !excludedIds.has(c.idList); });
 
-    // Store base data
     appData = {
       allCandidateCards:  allCandidateCards,
       listsMap:           listsMap,
@@ -1078,83 +995,68 @@ t.render(function() {
       jobLabelNames:      jobLabelNames,
       jobLabelColors:     jobLabelColors,
       boardMembers:       board.members || [],
+      restApiAuthorized:  false,
       customFieldsReady:  false,
-      customFieldData:    {}  // labelName → { total, hired, remaining }
+      customFieldData:    {}
     };
 
-    // Render default view first so the UI appears immediately
     renderDashboard(buildByJob(filterCandidateCards('open')));
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display     = 'block';
     t.sizeTo('#app').catch(function() {});
 
-    // ── Async: fetch custom fields via REST API (requires auth) ──
-    return t.getRestApi().then(function(restApi) {
-      return restApi.isAuthorized().then(function(isAuthorized) {
-        appData.restApiAuthorized = isAuthorized;
-        if (!isAuthorized) return;
+    // ── Async: fetch custom fields via REST API ──────────────
+    var restApi = t.getRestApi();
+    restApi.isAuthorized().then(function(isAuthorized) {
+      appData.restApiAuthorized = isAuthorized;
+      if (!isAuthorized) return;
 
-        // 1. Get custom field definitions for this board
-        // 2. Get all board cards with their custom field item values
-        return Promise.all([
-          restApi.get('/1/boards/' + board.id + '/customFields'),
-          restApi.get('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
-        ]).then(function(cfResults) {
-          var fieldDefs  = cfResults[0]; // array of {id, name, type, ...}
-          var cfCards    = cfResults[1]; // array of {id, idList, labels, customFieldItems:[]}
+      return Promise.all([
+        restApi.get('/1/boards/' + board.id + '/customFields'),
+        restApi.get('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
+      ]).then(function(cfResults) {
+        var fieldDefs = cfResults[0];
+        var cfCards   = cfResults[1];
 
-          // Find field IDs for Total / Hired / Remaining (case-insensitive)
-          function findFieldId(name) {
-            var f = fieldDefs.find(function(d) {
-              return d.name.trim().toLowerCase() === name.toLowerCase();
-            });
-            return f ? f.id : null;
+        function findFieldId(name) {
+          var f = fieldDefs.find(function(d) { return d.name.trim().toLowerCase() === name.toLowerCase(); });
+          return f ? f.id : null;
+        }
+        var fTotal     = findFieldId('Total');
+        var fHired     = findFieldId('Hired');
+        var fRemaining = findFieldId('Remaining');
+
+        var jobListIds = new Set();
+        if (openJobsList)   jobListIds.add(openJobsList.id);
+        if (closedJobsList) jobListIds.add(closedJobsList.id);
+
+        var cfData = {};
+        cfCards.forEach(function(card) {
+          if (!jobListIds.has(card.idList)) return;
+          var items = card.customFieldItems || [];
+          function getVal(fieldId) {
+            if (!fieldId) return null;
+            var item = items.find(function(i) { return i.idCustomField === fieldId; });
+            if (!item || !item.value) return null;
+            var n = parseFloat(item.value.number !== undefined ? item.value.number : item.value.text);
+            return isNaN(n) ? null : n;
           }
-          var fTotal     = findFieldId('Total');
-          var fHired     = findFieldId('Hired');
-          var fRemaining = findFieldId('Remaining');
-
-          // Job list IDs
-          var jobListIds = new Set();
-          if (openJobsList)  jobListIds.add(openJobsList.id);
-          if (closedJobsList) jobListIds.add(closedJobsList.id);
-
-          // Build customFieldData: labelName → { total, hired, remaining }
-          var cfData = {};
-
-          cfCards.forEach(function(card) {
-            if (!jobListIds.has(card.idList)) return;
-            var items = card.customFieldItems || [];
-
-            function getVal(fieldId) {
-              if (!fieldId) return null;
-              var item = items.find(function(i) { return i.idCustomField === fieldId; });
-              if (!item || !item.value) return null;
-              var n = parseFloat(item.value.number !== undefined ? item.value.number : item.value.text);
-              return isNaN(n) ? null : n;
-            }
-
-            var total     = getVal(fTotal);
-            var hired     = getVal(fHired);
-            var remaining = getVal(fRemaining);
-
-            (card.labels || []).forEach(function(l) {
-              var name = l.name || ('(no name - ' + l.color + ')');
-              if (!cfData[name]) cfData[name] = { total: null, hired: null, remaining: null };
-              if (total     !== null) cfData[name].total     = (cfData[name].total     || 0) + total;
-              if (hired     !== null) cfData[name].hired     = (cfData[name].hired     || 0) + hired;
-              if (remaining !== null) cfData[name].remaining = (cfData[name].remaining || 0) + remaining;
-            });
+          var total = getVal(fTotal), hired = getVal(fHired), remaining = getVal(fRemaining);
+          (card.labels || []).forEach(function(l) {
+            var name = l.name || ('(no name - ' + l.color + ')');
+            if (!cfData[name]) cfData[name] = { total: null, hired: null, remaining: null };
+            if (total     !== null) cfData[name].total     = (cfData[name].total     || 0) + total;
+            if (hired     !== null) cfData[name].hired     = (cfData[name].hired     || 0) + hired;
+            if (remaining !== null) cfData[name].remaining = (cfData[name].remaining || 0) + remaining;
           });
-
-          appData.customFieldData   = cfData;
-          appData.customFieldsReady = true;
-
-          // If user is already on the Hired vs Remaining view, re-render it
-          if (document.getElementById('dashboard-switcher').value === 'hired-vs-remaining') {
-            renderHiredVsRemaining();
-          }
         });
+
+        appData.customFieldData  = cfData;
+        appData.customFieldsReady = true;
+
+        if (document.getElementById('dashboard-switcher').value === 'hired-vs-remaining') {
+          renderHiredVsRemaining();
+        }
       });
     }).catch(function(err) {
       console.warn('HR Dashboard: custom fields not loaded -', err);
