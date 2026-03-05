@@ -288,7 +288,10 @@ function makeStripeCanvas(hexColor, direction) {
   return pc;
 }
 
-var t = window.TrelloPowerUp.iframe();
+var t = window.TrelloPowerUp.iframe({
+  appKey:  '9a5ae11fbd8699d50f22dd0b21ace619',
+  appName: 'HR Dashboard'
+});
 
 // Holds fetched data so switcher doesn't re-fetch
 var appData = null;
