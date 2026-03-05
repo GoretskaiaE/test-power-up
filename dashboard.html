@@ -1018,7 +1018,14 @@ t.render(function() {
         var auth = '?key=' + key + '&token=' + token;
 
         function apiFetch(path) {
-          return fetch(base + path + auth).then(function(r) { return r.json(); });
+          return fetch(base + path + auth).then(function(r) {
+            if (!r.ok) {
+              return r.text().then(function(txt) {
+                throw new Error('Trello API ' + r.status + ': ' + txt);
+              });
+            }
+            return r.json();
+          });
         }
 
         return Promise.all([
