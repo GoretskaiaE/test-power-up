@@ -240,29 +240,54 @@ var COLOURS = [
   '#172b4d', '#97a0af'
 ];
 
-// Trello label color name → hex
+// Trello label color name → hex (current palette: subtle / normal / bold)
 var TRELLO_LABEL_COLOURS = {
-  'green':        '#61bd4f',
-  'yellow':       '#f2d600',
-  'orange':       '#ff9f1a',
-  'red':          '#eb5a46',
-  'purple':       '#c377e0',
-  'blue':         '#0079bf',
-  'sky':          '#00c2e0',
-  'lime':         '#51e898',
-  'pink':         '#ff78cb',
-  'black':        '#344563',
-  'green_dark':   '#519839',
-  'yellow_dark':  '#d9b51c',
-  'orange_dark':  '#d35400',
-  'red_dark':     '#b04632',
-  'purple_dark':  '#89609e',
-  'blue_dark':    '#055a8c',
-  'sky_dark':     '#0098b7',
-  'lime_dark':    '#4bbf6b',
-  'pink_dark':    '#d14f8b',
-  'black_dark':   '#172b4d'
+  // ── Green ──
+  'green_light':  '#d3f1e0',
+  'green':        '#4bce97',
+  'green_dark':   '#1f845a',
+  // ── Yellow ──
+  'yellow_light': '#f9f0c2',
+  'yellow':       '#f5cd47',
+  'yellow_dark':  '#946f00',
+  // ── Orange ──
+  'orange_light': '#ffe8d3',
+  'orange':       '#fea362',
+  'orange_dark':  '#c25100',
+  // ── Red ──
+  'red_light':    '#ffd5d2',
+  'red':          '#f87168',
+  'red_dark':     '#ca3521',
+  // ── Purple ──
+  'purple_light': '#efe0fb',
+  'purple':       '#9f8fef',
+  'purple_dark':  '#6e5dc6',
+  // ── Blue ──
+  'blue_light':   '#cce0ff',
+  'blue':         '#579dff',
+  'blue_dark':    '#0c66e4',
+  // ── Sky ──
+  'sky_light':    '#c6edfb',
+  'sky':          '#6cc3e0',
+  'sky_dark':     '#227d9b',
+  // ── Lime ──
+  'lime_light':   '#d3f1a7',
+  'lime':         '#94c748',
+  'lime_dark':    '#5b7f24',
+  // ── Pink ──
+  'pink_light':   '#fdd0ec',
+  'pink':         '#e774bb',
+  'pink_dark':    '#ae4787',
+  // ── Black / Grey ──
+  'black_light':  '#dcdfe4',
+  'black':        '#8590a2',
+  'black_dark':   '#626f86'
 };
+
+// Label with no colour set in Trello
+var COLOUR_NO_LABEL  = '#97a0af';
+// Cards with no label at all (Unassigned)
+var COLOUR_UNASSIGNED = '#c1c7d0';
 
 var t = window.TrelloPowerUp.iframe();
 
@@ -404,7 +429,8 @@ function renderDashboard(config) {
 
 // ── Dashboard: Candidates per Job (grouped by label) ──────────────
 function buildByJob(candidateCards) {
-  var groups = {};
+  var groups      = {};
+  var groupColors = {};
 
   // Pre-initialize all known job labels from Open+Closed Jobs lists
   // so jobs with 0 matching candidates still appear
@@ -418,31 +444,31 @@ function buildByJob(candidateCards) {
     knownLabelIds = Object.keys(appData.jobLabelNames);
   }
   knownLabelIds.forEach(function(id) {
-    var name = appData.jobLabelNames[id];
-    if (name) groups[name] = 0;
-  });
-
-  // Also build groupColors: job name → hex colour from Trello label
-  var groupColors = {};
-  knownLabelIds.forEach(function(id) {
     var name  = appData.jobLabelNames[id];
     var color = appData.jobLabelColors[id];
-    if (name) groupColors[name] = TRELLO_LABEL_COLOURS[color] || null;
+    if (name) {
+      groups[name]      = 0;
+      // null color in Trello = label with no colour set → use COLOUR_NO_LABEL
+      groupColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
+    }
   });
 
   candidateCards.forEach(function(card) {
     if (card.labels && card.labels.length > 0) {
       card.labels.forEach(function(label) {
-        var name = label.name || ('(no name - ' + label.color + ')');
+        var name  = label.name || ('(no name - ' + label.color + ')');
+        var color = label.color;
         groups[name] = (groups[name] || 0) + 1;
         if (!groupColors[name]) {
-          groupColors[name] = TRELLO_LABEL_COLOURS[label.color] || null;
+          groupColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
         }
       });
     } else {
       groups['Unassigned'] = (groups['Unassigned'] || 0) + 1;
+      groupColors['Unassigned'] = COLOUR_UNASSIGNED;
     }
   });
+
   return {
     title:       'Candidates per Job',
     chartTitle:  'Candidates per Job',
@@ -822,9 +848,9 @@ t.render(function() {
     var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
 
     // Collect label IDs from cards in Open Jobs list
-    var openLabelIds  = new Set();
+    var openLabelIds   = new Set();
     var jobLabelNames  = {}; // id → name
-    var jobLabelColors = {}; // id → color name
+    var jobLabelColors = {}; // id → Trello color name
     if (openJobsList) {
       allCards
         .filter(function(c) { return c.idList === openJobsList.id; })
