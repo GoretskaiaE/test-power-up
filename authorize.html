@@ -56,9 +56,10 @@
 </div>
 
 <script>
-  // Note: appKey/appName are set in index.html via TrelloPowerUp.initialize.
-  // authorize.html is loaded as a popup so the t object here does NOT need them.
-  var t = window.TrelloPowerUp.iframe();
+  var t = window.TrelloPowerUp.iframe({
+    appKey:  '9a5ae11fbd8699d50f22dd0b21ace619',
+    appName: 'HR Dashboard'
+  });
 
   document.getElementById('auth-btn').addEventListener('click', function() {
     var btn    = document.getElementById('auth-btn');
