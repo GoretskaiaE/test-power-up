@@ -240,6 +240,30 @@ var COLOURS = [
   '#172b4d', '#97a0af'
 ];
 
+// Trello label color name → hex
+var TRELLO_LABEL_COLOURS = {
+  'green':        '#61bd4f',
+  'yellow':       '#f2d600',
+  'orange':       '#ff9f1a',
+  'red':          '#eb5a46',
+  'purple':       '#c377e0',
+  'blue':         '#0079bf',
+  'sky':          '#00c2e0',
+  'lime':         '#51e898',
+  'pink':         '#ff78cb',
+  'black':        '#344563',
+  'green_dark':   '#519839',
+  'yellow_dark':  '#d9b51c',
+  'orange_dark':  '#d35400',
+  'red_dark':     '#b04632',
+  'purple_dark':  '#89609e',
+  'blue_dark':    '#055a8c',
+  'sky_dark':     '#0098b7',
+  'lime_dark':    '#4bbf6b',
+  'pink_dark':    '#d14f8b',
+  'black_dark':   '#172b4d'
+};
+
 var t = window.TrelloPowerUp.iframe();
 
 // Holds fetched data so switcher doesn't re-fetch
@@ -307,9 +331,11 @@ function renderDashboard(config) {
   document.getElementById('stat-groups').textContent       = numGroups;
   document.getElementById('stat-avg').textContent          = avg;
 
-  // Colours
-  var barColours = groupNames.map(function(_, i) {
-    return COLOURS[i % COLOURS.length];
+  // Colours: use label colours if provided, otherwise fall back to palette
+  var barColours = groupNames.map(function(name, i) {
+    return (config.groupColors && config.groupColors[name])
+      ? config.groupColors[name]
+      : COLOURS[i % COLOURS.length];
   });
 
   // Destroy previous chart if exists
@@ -396,11 +422,22 @@ function buildByJob(candidateCards) {
     if (name) groups[name] = 0;
   });
 
+  // Also build groupColors: job name → hex colour from Trello label
+  var groupColors = {};
+  knownLabelIds.forEach(function(id) {
+    var name  = appData.jobLabelNames[id];
+    var color = appData.jobLabelColors[id];
+    if (name) groupColors[name] = TRELLO_LABEL_COLOURS[color] || null;
+  });
+
   candidateCards.forEach(function(card) {
     if (card.labels && card.labels.length > 0) {
       card.labels.forEach(function(label) {
         var name = label.name || ('(no name - ' + label.color + ')');
         groups[name] = (groups[name] || 0) + 1;
+        if (!groupColors[name]) {
+          groupColors[name] = TRELLO_LABEL_COLOURS[label.color] || null;
+        }
       });
     } else {
       groups['Unassigned'] = (groups['Unassigned'] || 0) + 1;
@@ -411,7 +448,8 @@ function buildByJob(candidateCards) {
     chartTitle:  'Candidates per Job',
     groupsLabel: 'Open Jobs',
     totalCards:  candidateCards.length,
-    groups:      groups
+    groups:      groups,
+    groupColors: groupColors
   };
 }
 
@@ -784,15 +822,17 @@ t.render(function() {
     var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
 
     // Collect label IDs from cards in Open Jobs list
-    var openLabelIds = new Set();
-    var jobLabelNames = {}; // id → name for all labels on Open+Closed job cards
+    var openLabelIds  = new Set();
+    var jobLabelNames  = {}; // id → name
+    var jobLabelColors = {}; // id → color name
     if (openJobsList) {
       allCards
         .filter(function(c) { return c.idList === openJobsList.id; })
         .forEach(function(c) {
           (c.labels || []).forEach(function(l) {
             openLabelIds.add(l.id);
-            jobLabelNames[l.id] = l.name || ('(no name - ' + l.color + ')');
+            jobLabelNames[l.id]  = l.name || ('(no name - ' + l.color + ')');
+            jobLabelColors[l.id] = l.color || null;
           });
         });
     }
@@ -805,7 +845,8 @@ t.render(function() {
         .forEach(function(c) {
           (c.labels || []).forEach(function(l) {
             closedLabelIds.add(l.id);
-            jobLabelNames[l.id] = l.name || ('(no name - ' + l.color + ')');
+            jobLabelNames[l.id]  = l.name || ('(no name - ' + l.color + ')');
+            jobLabelColors[l.id] = l.color || null;
           });
         });
     }
@@ -830,6 +871,7 @@ t.render(function() {
       openLabelIds:      openLabelIds,
       closedLabelIds:    closedLabelIds,
       jobLabelNames:     jobLabelNames,
+      jobLabelColors:    jobLabelColors,
       boardMembers:      board.members || []
     };
 
