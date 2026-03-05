@@ -183,6 +183,7 @@
           <option value="by-stage">Candidates per Stage</option>
           <option value="by-job-and-stage">Candidates per Job and Stage</option>
           <option value="by-member-and-stage">Candidates per Member and Stage</option>
+          <option value="hired-vs-remaining">Hired vs. Remaining</option>
         </select>
       </div>
     </div>
@@ -223,12 +224,13 @@
 
 <script>
 /* ============================================
-   HR Dashboard v4
+   HR Dashboard v5
    Dashboards:
-   1. Candidates per Job        — groups cards by label
-   2. Candidates per Stage      — groups cards by list name
-   3. Candidates per Job+Stage  — stacked bar by label × list
-   4. Candidates per Member+Stage — stacked bar by member × list
+   1. Candidates per Job           — groups cards by label
+   2. Candidates per Stage         — groups cards by list name
+   3. Candidates per Job+Stage     — stacked bar by label × list
+   4. Candidates per Member+Stage  — stacked bar by member × list
+   5. Hired vs. Remaining          — grouped bar using custom fields
    Job type filter applies to all dashboards.
 ============================================ */
 
@@ -242,52 +244,49 @@ var COLOURS = [
 
 // Trello label color name → hex (current palette: subtle / normal / bold)
 var TRELLO_LABEL_COLOURS = {
-  // ── Green ──
-  'green_light':  '#d3f1e0',
-  'green':        '#4bce97',
-  'green_dark':   '#1f845a',
-  // ── Yellow ──
-  'yellow_light': '#f9f0c2',
-  'yellow':       '#f5cd47',
-  'yellow_dark':  '#946f00',
-  // ── Orange ──
-  'orange_light': '#ffe8d3',
-  'orange':       '#fea362',
-  'orange_dark':  '#c25100',
-  // ── Red ──
-  'red_light':    '#ffd5d2',
-  'red':          '#f87168',
-  'red_dark':     '#ca3521',
-  // ── Purple ──
-  'purple_light': '#efe0fb',
-  'purple':       '#9f8fef',
-  'purple_dark':  '#6e5dc6',
-  // ── Blue ──
-  'blue_light':   '#cce0ff',
-  'blue':         '#579dff',
-  'blue_dark':    '#0c66e4',
-  // ── Sky ──
-  'sky_light':    '#c6edfb',
-  'sky':          '#6cc3e0',
-  'sky_dark':     '#227d9b',
-  // ── Lime ──
-  'lime_light':   '#d3f1a7',
-  'lime':         '#94c748',
-  'lime_dark':    '#5b7f24',
-  // ── Pink ──
-  'pink_light':   '#fdd0ec',
-  'pink':         '#e774bb',
-  'pink_dark':    '#ae4787',
-  // ── Black / Grey ──
-  'black_light':  '#dcdfe4',
-  'black':        '#8590a2',
-  'black_dark':   '#626f86'
+  'green_light':  '#d3f1e0', 'green':        '#4bce97', 'green_dark':   '#1f845a',
+  'yellow_light': '#f9f0c2', 'yellow':       '#f5cd47', 'yellow_dark':  '#946f00',
+  'orange_light': '#ffe8d3', 'orange':       '#fea362', 'orange_dark':  '#c25100',
+  'red_light':    '#ffd5d2', 'red':          '#f87168', 'red_dark':     '#ca3521',
+  'purple_light': '#efe0fb', 'purple':       '#9f8fef', 'purple_dark':  '#6e5dc6',
+  'blue_light':   '#cce0ff', 'blue':         '#579dff', 'blue_dark':    '#0c66e4',
+  'sky_light':    '#c6edfb', 'sky':          '#6cc3e0', 'sky_dark':     '#227d9b',
+  'lime_light':   '#d3f1a7', 'lime':         '#94c748', 'lime_dark':    '#5b7f24',
+  'pink_light':   '#fdd0ec', 'pink':         '#e774bb', 'pink_dark':    '#ae4787',
+  'black_light':  '#dcdfe4', 'black':        '#8590a2', 'black_dark':   '#626f86'
 };
 
-// Label with no colour set in Trello
-var COLOUR_NO_LABEL  = '#97a0af';
-// Cards with no label at all (Unassigned)
-var COLOUR_UNASSIGNED = '#c1c7d0';
+var COLOUR_NO_LABEL   = '#97a0af'; // label exists but has no colour set
+var COLOUR_UNASSIGNED = '#c1c7d0'; // card has no label at all
+
+// ── Stripe pattern helper for Hired vs. Remaining chart ───────────
+// Returns a small canvas suitable for ctx.createPattern()
+function makeStripeCanvas(hexColor, direction) {
+  var size = 8;
+  var pc   = document.createElement('canvas');
+  pc.width = size; pc.height = size;
+  var cx   = pc.getContext('2d');
+  // White background
+  cx.fillStyle = '#ffffff';
+  cx.fillRect(0, 0, size, size);
+  // Stripe
+  cx.strokeStyle = hexColor;
+  cx.lineWidth   = 2.5;
+  cx.beginPath();
+  if (direction === 'fwd') {
+    // ╱ forward slash stripes
+    cx.moveTo(size,  0);    cx.lineTo(0,      size);
+    cx.moveTo(size*2, 0);   cx.lineTo(0,      size*2);
+    cx.moveTo(size, -size); cx.lineTo(-size,  size);
+  } else {
+    // ╲ back slash stripes
+    cx.moveTo(0,     0);    cx.lineTo(size,   size);
+    cx.moveTo(-size, 0);    cx.lineTo(size,   size*2);
+    cx.moveTo(0,    -size); cx.lineTo(size*2, size);
+  }
+  cx.stroke();
+  return pc;
+}
 
 var t = window.TrelloPowerUp.iframe();
 
@@ -433,7 +432,6 @@ function buildByJob(candidateCards) {
   var groupColors = {};
 
   // Pre-initialize all known job labels from Open+Closed Jobs lists
-  // so jobs with 0 matching candidates still appear
   var jobType = document.getElementById('job-type-switcher').value;
   var knownLabelIds = [];
   if (jobType === 'open') {
@@ -448,7 +446,6 @@ function buildByJob(candidateCards) {
     var color = appData.jobLabelColors[id];
     if (name) {
       groups[name]      = 0;
-      // null color in Trello = label with no colour set → use COLOUR_NO_LABEL
       groupColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
     }
   });
@@ -464,7 +461,7 @@ function buildByJob(candidateCards) {
         }
       });
     } else {
-      groups['Unassigned'] = (groups['Unassigned'] || 0) + 1;
+      groups['Unassigned']      = (groups['Unassigned'] || 0) + 1;
       groupColors['Unassigned'] = COLOUR_UNASSIGNED;
     }
   });
@@ -797,9 +794,197 @@ function renderStackedDashboard(config) {
 }
 
 
+// ── Dashboard: Hired vs. Remaining ────────────────────────────────
+function renderHiredVsRemaining() {
+  var jobType = document.getElementById('job-type-switcher').value;
+
+  // Resolve which label IDs are in scope for the current filter
+  var knownLabelIds = [];
+  if (jobType === 'open') {
+    knownLabelIds = Array.from(appData.openLabelIds);
+  } else if (jobType === 'closed') {
+    knownLabelIds = Array.from(appData.closedLabelIds);
+  } else {
+    knownLabelIds = Object.keys(appData.jobLabelNames);
+  }
+
+  // Build ordered job list with colours
+  var jobNames   = [];
+  var jobColors  = {};
+  var seen       = {};
+  knownLabelIds.forEach(function(id) {
+    var name  = appData.jobLabelNames[id];
+    var color = appData.jobLabelColors[id];
+    if (name && !seen[name]) {
+      seen[name]     = true;
+      jobNames.push(name);
+      jobColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
+    }
+  });
+
+  // Update header stats
+  document.getElementById('dashboard-title').textContent   = 'Hired vs. Remaining';
+  document.getElementById('chart-title').textContent       = 'Hired vs. Remaining per Job';
+  document.getElementById('stat-groups-label').textContent = 'Jobs';
+  document.getElementById('stat-groups').textContent       = jobNames.length;
+  document.getElementById('stat-avg').textContent          = '—';
+  document.getElementById('stat-total').textContent        = '—';
+
+  // Show auth / loading message if custom fields not ready
+  var listEl = document.getElementById('item-list');
+  listEl.innerHTML = '';
+
+  if (!appData.restApiAuthorized) {
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    document.getElementById('chart-title').textContent = '';
+    listEl.innerHTML =
+      '<div style="text-align:center;padding:40px 20px;color:#6b778c;font-size:13px;">' +
+      '🔑 This dashboard requires authorization.<br><br>' +
+      'Click the ⚙️ gear icon on the HR Dashboard Power-Up and select <strong>Authorize Account</strong>.' +
+      '</div>';
+    t.sizeTo('#app').catch(function() {});
+    return;
+  }
+
+  if (!appData.customFieldsReady) {
+    listEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#6b778c;font-size:13px;">⏳ Loading custom field data…</div>';
+    t.sizeTo('#app').catch(function() {});
+    return;
+  }
+
+  var cfData = appData.customFieldData;
+
+  // Build dataset values
+  var totals    = jobNames.map(function(n) { return cfData[n] ? (cfData[n].total     || 0) : 0; });
+  var hired     = jobNames.map(function(n) { return cfData[n] ? (cfData[n].hired     || 0) : 0; });
+  var remaining = jobNames.map(function(n) { return cfData[n] ? (cfData[n].remaining || 0) : 0; });
+
+  // Update total stat with sum of all Totals
+  var grandTotal = totals.reduce(function(s, v) { return s + v; }, 0);
+  document.getElementById('stat-total').textContent = grandTotal;
+
+  // Create stripe patterns per job
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  var chartCtx = document.getElementById('myChart').getContext('2d');
+
+  var totalBg = jobNames.map(function(n) { return jobColors[n]; });
+
+  var hiredBg = jobNames.map(function(n) {
+    return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'fwd'), 'repeat');
+  });
+
+  var remainingBg = jobNames.map(function(n) {
+    return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'back'), 'repeat');
+  });
+
+  var borderColors = jobNames.map(function(n) { return jobColors[n]; });
+
+  chartInstance = new Chart(chartCtx, {
+    type: 'bar',
+    data: {
+      labels: jobNames,
+      datasets: [
+        {
+          label:           'Total',
+          data:            totals,
+          backgroundColor: totalBg,
+          borderColor:     borderColors,
+          borderWidth:     2,
+          borderRadius:    4,
+          borderSkipped:   false
+        },
+        {
+          label:           'Hired',
+          data:            hired,
+          backgroundColor: hiredBg,
+          borderColor:     borderColors,
+          borderWidth:     2,
+          borderRadius:    4,
+          borderSkipped:   false
+        },
+        {
+          label:           'Remaining',
+          data:            remaining,
+          backgroundColor: remainingBg,
+          borderColor:     borderColors,
+          borderWidth:     2,
+          borderRadius:    4,
+          borderSkipped:   false
+        }
+      ]
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display:  true,
+          position: 'bottom',
+          labels:   { boxWidth: 14, font: { size: 11 } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ' ' + ctx.dataset.label + ': ' + ctx.parsed.y;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks:       { stepSize: 1, precision: 0 },
+          grid:        { color: '#f0f0f0' }
+        }
+      }
+    }
+  });
+
+  // Summary table below chart
+  var table = document.createElement('table');
+  table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:16px;';
+
+  // Header
+  var thead   = document.createElement('thead');
+  var headRow = document.createElement('tr');
+  [['Job', 'left'], ['Total', 'center'], ['Hired', 'center'], ['Remaining', 'center']].forEach(function(col) {
+    var th = document.createElement('th');
+    th.style.cssText = 'text-align:' + col[1] + ';padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;white-space:nowrap;';
+    th.textContent = col[0];
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  jobNames.forEach(function(name, i) {
+    var tr  = document.createElement('tr');
+    tr.style.background = i % 2 === 0 ? '#f8f9fc' : '#ffffff';
+    var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
+
+    [[dot + name, 'left', true], [totals[i], 'center', false], [hired[i], 'center', false], [remaining[i], 'center', false]].forEach(function(cell) {
+      var td = document.createElement('td');
+      td.style.cssText = 'padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:' + cell[1] + ';';
+      if (cell[2]) { td.innerHTML = cell[0]; } else { td.textContent = cell[0]; }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  listEl.appendChild(table);
+
+  t.sizeTo('#app').catch(function() {});
+}
+
+
 function switchDashboard(view, jobType) {
   if (!appData) return;
   jobType = jobType || document.getElementById('job-type-switcher').value;
+  if (view === 'hired-vs-remaining') {
+    renderHiredVsRemaining();
+    return;
+  }
   var cards = filterCandidateCards(jobType);
   if (view === 'by-job-and-stage') {
     renderStackedDashboard(buildByJobAndStage(cards, appData.listsMap));
@@ -823,7 +1008,7 @@ document.getElementById('job-type-switcher').addEventListener('change', function
 // ── Main ───────────────────────────────────────────────────────────
 t.render(function() {
   Promise.all([
-    t.board('name', 'members'),
+    t.board('id', 'name', 'members'),
     t.lists('id', 'name'),
     t.cards('id', 'name', 'labels', 'idList', 'members')
   ])
@@ -847,42 +1032,33 @@ t.render(function() {
     var openJobsList   = lists.find(function(l) { return l.name.trim().toLowerCase() === 'open jobs'; });
     var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
 
-    // Collect label IDs from cards in Open Jobs list
+    // Collect label IDs + names + colors from job list cards
     var openLabelIds   = new Set();
+    var closedLabelIds = new Set();
     var jobLabelNames  = {}; // id → name
     var jobLabelColors = {}; // id → Trello color name
-    if (openJobsList) {
-      allCards
-        .filter(function(c) { return c.idList === openJobsList.id; })
-        .forEach(function(c) {
-          (c.labels || []).forEach(function(l) {
-            openLabelIds.add(l.id);
-            jobLabelNames[l.id]  = l.name || ('(no name - ' + l.color + ')');
-            jobLabelColors[l.id] = l.color || null;
-          });
-        });
+
+    function collectLabels(card, targetSet) {
+      (card.labels || []).forEach(function(l) {
+        targetSet.add(l.id);
+        jobLabelNames[l.id]  = l.name || ('(no name - ' + l.color + ')');
+        jobLabelColors[l.id] = l.color || null;
+      });
     }
 
-    // Collect label IDs from cards in Closed Jobs list
-    var closedLabelIds = new Set();
+    if (openJobsList) {
+      allCards.filter(function(c) { return c.idList === openJobsList.id; })
+        .forEach(function(c) { collectLabels(c, openLabelIds); });
+    }
     if (closedJobsList) {
-      allCards
-        .filter(function(c) { return c.idList === closedJobsList.id; })
-        .forEach(function(c) {
-          (c.labels || []).forEach(function(l) {
-            closedLabelIds.add(l.id);
-            jobLabelNames[l.id]  = l.name || ('(no name - ' + l.color + ')');
-            jobLabelColors[l.id] = l.color || null;
-          });
-        });
+      allCards.filter(function(c) { return c.idList === closedJobsList.id; })
+        .forEach(function(c) { collectLabels(c, closedLabelIds); });
     }
 
     // Build listsMap: id → name (for all non-excluded lists)
     var listsMap = {};
     lists.forEach(function(l) {
-      if (!excludedIds.has(l.id)) {
-        listsMap[l.id] = l.name;
-      }
+      if (!excludedIds.has(l.id)) listsMap[l.id] = l.name;
     });
 
     // All candidate cards (no job-type filter yet)
@@ -890,23 +1066,96 @@ t.render(function() {
       return !excludedIds.has(c.idList);
     });
 
-    // Store for switcher re-use
+    // Store base data
     appData = {
-      allCandidateCards: allCandidateCards,
-      listsMap:          listsMap,
-      openLabelIds:      openLabelIds,
-      closedLabelIds:    closedLabelIds,
-      jobLabelNames:     jobLabelNames,
-      jobLabelColors:    jobLabelColors,
-      boardMembers:      board.members || []
+      allCandidateCards:  allCandidateCards,
+      listsMap:           listsMap,
+      openLabelIds:       openLabelIds,
+      closedLabelIds:     closedLabelIds,
+      jobLabelNames:      jobLabelNames,
+      jobLabelColors:     jobLabelColors,
+      boardMembers:       board.members || [],
+      customFieldsReady:  false,
+      customFieldData:    {}  // labelName → { total, hired, remaining }
     };
 
-    // Render default view: Open Jobs filter, Candidates per Job
+    // Render default view first so the UI appears immediately
     renderDashboard(buildByJob(filterCandidateCards('open')));
-
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display     = 'block';
     t.sizeTo('#app').catch(function() {});
+
+    // ── Async: fetch custom fields via REST API (requires auth) ──
+    return t.getRestApi().then(function(restApi) {
+      return restApi.isAuthorized().then(function(isAuthorized) {
+        appData.restApiAuthorized = isAuthorized;
+        if (!isAuthorized) return;
+
+        // 1. Get custom field definitions for this board
+        // 2. Get all board cards with their custom field item values
+        return Promise.all([
+          restApi.get('/1/boards/' + board.id + '/customFields'),
+          restApi.get('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
+        ]).then(function(cfResults) {
+          var fieldDefs  = cfResults[0]; // array of {id, name, type, ...}
+          var cfCards    = cfResults[1]; // array of {id, idList, labels, customFieldItems:[]}
+
+          // Find field IDs for Total / Hired / Remaining (case-insensitive)
+          function findFieldId(name) {
+            var f = fieldDefs.find(function(d) {
+              return d.name.trim().toLowerCase() === name.toLowerCase();
+            });
+            return f ? f.id : null;
+          }
+          var fTotal     = findFieldId('Total');
+          var fHired     = findFieldId('Hired');
+          var fRemaining = findFieldId('Remaining');
+
+          // Job list IDs
+          var jobListIds = new Set();
+          if (openJobsList)  jobListIds.add(openJobsList.id);
+          if (closedJobsList) jobListIds.add(closedJobsList.id);
+
+          // Build customFieldData: labelName → { total, hired, remaining }
+          var cfData = {};
+
+          cfCards.forEach(function(card) {
+            if (!jobListIds.has(card.idList)) return;
+            var items = card.customFieldItems || [];
+
+            function getVal(fieldId) {
+              if (!fieldId) return null;
+              var item = items.find(function(i) { return i.idCustomField === fieldId; });
+              if (!item || !item.value) return null;
+              var n = parseFloat(item.value.number !== undefined ? item.value.number : item.value.text);
+              return isNaN(n) ? null : n;
+            }
+
+            var total     = getVal(fTotal);
+            var hired     = getVal(fHired);
+            var remaining = getVal(fRemaining);
+
+            (card.labels || []).forEach(function(l) {
+              var name = l.name || ('(no name - ' + l.color + ')');
+              if (!cfData[name]) cfData[name] = { total: null, hired: null, remaining: null };
+              if (total     !== null) cfData[name].total     = (cfData[name].total     || 0) + total;
+              if (hired     !== null) cfData[name].hired     = (cfData[name].hired     || 0) + hired;
+              if (remaining !== null) cfData[name].remaining = (cfData[name].remaining || 0) + remaining;
+            });
+          });
+
+          appData.customFieldData   = cfData;
+          appData.customFieldsReady = true;
+
+          // If user is already on the Hired vs Remaining view, re-render it
+          if (document.getElementById('dashboard-switcher').value === 'hired-vs-remaining') {
+            renderHiredVsRemaining();
+          }
+        });
+      });
+    }).catch(function(err) {
+      console.warn('HR Dashboard: custom fields not loaded -', err);
+    });
   })
   .catch(function(err) {
     showError('Error loading board data: ' + err.message);
