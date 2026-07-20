@@ -227,7 +227,7 @@
 
 <script>
 /* ============================================
-   HR Dashboard v6
+   HR Dashboard v8
    Dashboards:
    1. Candidates per Job           — groups cards by label
    2. Candidates per Stage         — groups cards by list name
@@ -237,16 +237,16 @@
    Job type filter applies to all dashboards.
 ============================================ */
 
-var EXCLUDED_LISTS = ['clients', 'open jobs', 'closed jobs'];
+const EXCLUDED_LISTS = ['clients', 'open jobs', 'closed jobs', '<spacer>'];
 
-var COLOURS = [
+const COLOURS = [
   '#0052cc', '#00875a', '#ff5630', '#ff8b00',
   '#6554c0', '#00b8d9', '#36b37e', '#ff7452',
   '#172b4d', '#97a0af'
 ];
 
 // Trello label color name → hex (current palette: subtle / normal / bold)
-var TRELLO_LABEL_COLOURS = {
+const TRELLO_LABEL_COLOURS = {
   'green_light':  '#d3f1e0', 'green':        '#4bce97', 'green_dark':   '#1f845a',
   'yellow_light': '#f9f0c2', 'yellow':       '#f5cd47', 'yellow_dark':  '#946f00',
   'orange_light': '#ffe8d3', 'orange':       '#fea362', 'orange_dark':  '#c25100',
@@ -259,15 +259,15 @@ var TRELLO_LABEL_COLOURS = {
   'black_light':  '#dcdfe4', 'black':        '#8590a2', 'black_dark':   '#626f86'
 };
 
-var COLOUR_NO_LABEL   = '#97a0af'; // label exists but has no colour set
-var COLOUR_UNASSIGNED = '#c1c7d0'; // card has no label at all
+const COLOUR_NO_LABEL   = '#97a0af'; // label exists but has no colour set
+const COLOUR_UNASSIGNED = '#c1c7d0'; // card has no label at all
 
 // ── Stripe pattern helper for Hired vs. Remaining chart ───────────
 function makeStripeCanvas(hexColor, direction) {
-  var size = 8;
-  var pc   = document.createElement('canvas');
+  let size = 8;
+  let pc   = document.createElement('canvas');
   pc.width = size; pc.height = size;
-  var cx   = pc.getContext('2d');
+  let cx   = pc.getContext('2d');
   cx.fillStyle = '#ffffff';
   cx.fillRect(0, 0, size, size);
   cx.strokeStyle = hexColor;
@@ -286,20 +286,20 @@ function makeStripeCanvas(hexColor, direction) {
   return pc;
 }
 
-var t = window.TrelloPowerUp.iframe({
+const t = window.TrelloPowerUp.iframe({
   appKey:  '8b05c6c33e07f45582b9d6bcfa9d5e17',
-  appName: 'HR Dashboard 2.2'
+  appName: 'HR Dashboard v8'
 });
 
 // Holds fetched data so switcher doesn't re-fetch
-var appData = null;
-var chartInstance = null;
+let appData = null;
+let chartInstance = null;
 
 // ── Filter candidate cards by job type selection ───────────────────
 // openLabelIds  = Set of label IDs found on cards in "Open Jobs" list
 // closedLabelIds = Set of label IDs found on cards in "Closed Jobs" list
 function filterCandidateCards(jobType) {
-  var all = appData.allCandidateCards;
+  let all = appData.allCandidateCards;
 
   if (jobType === 'all') return all;
 
@@ -321,7 +321,7 @@ function filterCandidateCards(jobType) {
 
   if (jobType === 'unassigned') {
     // Cards that have NO label belonging to either open or closed jobs
-    var allJobLabelIds = new Set(
+    let allJobLabelIds = new Set(
       Array.from(appData.openLabelIds).concat(Array.from(appData.closedLabelIds))
     );
     return all.filter(function(card) {
@@ -333,6 +333,13 @@ function filterCandidateCards(jobType) {
   return all;
 }
 
+// "Need to hire" for a job = the job card's "Total" custom field.
+// Loaded async via REST; null until available (or if unauthorized/missing).
+function needToHireFor(jobName) {
+  let cf = appData && appData.customFieldData ? appData.customFieldData[jobName] : null;
+  return cf && cf.total !== null && cf.total !== undefined ? cf.total : null;
+}
+
 function showError(msg) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('app').style.display     = 'none';
@@ -342,11 +349,11 @@ function showError(msg) {
 
 // ── Render a dashboard view given a groups object { name: count } ──
 function renderDashboard(config) {
-  var groupNames  = Object.keys(config.groups);
-  var groupValues = groupNames.map(function(n) { return config.groups[n]; });
-  var total       = config.totalCards;
-  var numGroups   = groupNames.length;
-  var avg         = numGroups > 0 ? (total / numGroups).toFixed(1) : 0;
+  let groupNames  = Object.keys(config.groups);
+  let groupValues = groupNames.map(function(n) { return config.groups[n]; });
+  let total       = config.totalCards;
+  let numGroups   = groupNames.length;
+  let avg         = numGroups > 0 ? (total / numGroups).toFixed(1) : 0;
 
   // Stats
   document.getElementById('dashboard-title').textContent   = config.title;
@@ -357,7 +364,7 @@ function renderDashboard(config) {
   document.getElementById('stat-avg').textContent          = avg;
 
   // Colours: use label colours if provided, otherwise fall back to palette
-  var barColours = groupNames.map(function(name, i) {
+  let barColours = groupNames.map(function(name, i) {
     return (config.groupColors && config.groupColors[name])
       ? config.groupColors[name]
       : COLOURS[i % COLOURS.length];
@@ -370,70 +377,142 @@ function renderDashboard(config) {
   }
 
   // Draw chart
-  var ctx = document.getElementById('myChart').getContext('2d');
+  let ctx = document.getElementById('myChart').getContext('2d');
+
+  // With hired data (Candidates per Job): stacked bars — striped "Hired"
+  // segment at the bottom (same style as Hired vs. Remaining), solid
+  // "Remaining" segment on top. Without it: single solid bars as before.
+  let withHired = !!config.groupHired;
+  let datasets, tooltipLabel;
+  if (withHired) {
+    let hiredVals     = groupNames.map(function(n) { return config.groupHired[n] || 0; });
+    let remainingVals = groupNames.map(function(n, i) { return groupValues[i] - (config.groupHired[n] || 0); });
+    let hiredBg = groupNames.map(function(n, i) {
+      return ctx.createPattern(makeStripeCanvas(barColours[i], 'fwd'), 'repeat');
+    });
+    datasets = [
+      { label: 'Hired',     data: hiredVals,     backgroundColor: hiredBg,                                                 borderColor: barColours, borderWidth: 2, borderSkipped: false },
+      { label: 'Remaining', data: remainingVals, backgroundColor: barColours.map(function(c) { return c + 'cc'; }),        borderColor: barColours, borderWidth: 2, borderSkipped: false }
+    ];
+    tooltipLabel = function(tt) {
+      let name = tt.label;
+      if (tt.dataset.label === 'Hired') {
+        let need = needToHireFor(name);
+        return ' ' + (config.groupHired[name] || 0) + ' of ' + (need === null ? '—' : need);
+      }
+      // Solid-square line: total candidates for the job
+      return ' ' + (config.groups[name] || 0);
+    };
+  } else {
+    datasets = [{
+      label: 'Candidates',
+      data: groupValues,
+      backgroundColor: barColours.map(function(c) { return c + 'cc'; }),
+      borderColor: barColours,
+      borderWidth: 2,
+      borderRadius: 6,
+      borderSkipped: false
+    }];
+    tooltipLabel = function(tt) {
+      return ' ' + tt.parsed.y + ' candidate' + (tt.parsed.y !== 1 ? 's' : '');
+    };
+  }
+
   chartInstance = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: groupNames,
-      datasets: [{
-        label: 'Candidates',
-        data: groupValues,
-        backgroundColor: barColours.map(function(c) { return c + 'cc'; }),
-        borderColor: barColours,
-        borderWidth: 2,
-        borderRadius: 6,
-        borderSkipped: false
-      }]
+      datasets: datasets
     },
     options: {
       responsive:          true,
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: function(ctx) {
-              return ' ' + ctx.parsed.y + ' candidate' + (ctx.parsed.y !== 1 ? 's' : '');
+        tooltip: withHired
+          ? {
+              // Show both lines per bar: solid square + total first,
+              // striped square + "hired of need-to-hire" second
+              mode: 'index',
+              itemSort: function(a, b) { return b.datasetIndex - a.datasetIndex; },
+              callbacks: { label: tooltipLabel }
             }
-          }
-        }
+          : { callbacks: { label: tooltipLabel } }
       },
       scales: {
         y: {
+          stacked: withHired,
           beginAtZero: true,
           ticks: { stepSize: 1, precision: 0 },
           grid: { color: '#f0f0f0' }
         },
-        x: { grid: { display: false } }
+        x: { stacked: withHired, grid: { display: false } }
       }
     }
   });
 
   // Build list below chart
-  var listEl = document.getElementById('item-list');
+  let listEl = document.getElementById('item-list');
   listEl.innerHTML = '';
-  groupNames.forEach(function(name, i) {
-    var row = document.createElement('div');
-    row.className = 'item-row';
-    row.innerHTML =
-      '<div class="item-name">' +
-        '<div class="color-dot" style="background:' + barColours[i] + '"></div>' +
-        '<span>' + name + '</span>' +
-      '</div>' +
-      '<span class="item-count">' + config.groups[name] + '</span>';
-    listEl.appendChild(row);
-  });
+
+  if (withHired) {
+    // Summary table, same layout as "Hired vs. Remaining"
+    let table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:16px;';
+    let thead = document.createElement('thead');
+    let headRow = document.createElement('tr');
+    [['Job','left'],['Total','center'],['Hired','center']].forEach(function(col) {
+      let th = document.createElement('th');
+      th.style.cssText = 'text-align:' + col[1] + ';padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;';
+      th.textContent = col[0];
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    let tbody = document.createElement('tbody');
+    groupNames.forEach(function(name, i) {
+      let jobTotal  = config.groups[name] || 0;
+      let jobHired  = config.groupHired[name] || 0;
+      let need      = needToHireFor(name);
+      let hiredText = jobHired + ' of ' + (need === null ? '—' : need);
+      let tr = document.createElement('tr');
+      tr.style.background = i % 2 === 0 ? '#f8f9fc' : '#ffffff';
+      let dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + barColours[i] + ';margin-right:6px;vertical-align:middle;"></span>';
+      [[dot + escHtml(name),'left',true],[jobTotal,'center',false],[hiredText,'center',false]].forEach(function(cell) {
+        let td = document.createElement('td');
+        td.style.cssText = 'padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:' + cell[1] + ';';
+        if (cell[2]) { td.innerHTML = cell[0]; } else { td.textContent = cell[0]; }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    listEl.appendChild(table);
+  } else {
+    groupNames.forEach(function(name, i) {
+      let row = document.createElement('div');
+      row.className = 'item-row';
+      row.innerHTML =
+        '<div class="item-name">' +
+          '<div class="color-dot" style="background:' + barColours[i] + '"></div>' +
+          '<span>' + escHtml(name) + '</span>' +
+        '</div>' +
+        '<span class="item-count">' + config.groups[name] + '</span>';
+      listEl.appendChild(row);
+    });
+  }
 
   t.sizeTo('#app').catch(function() {});
 }
 
 // ── Dashboard: Candidates per Job (grouped by label) ──────────────
 function buildByJob(candidateCards) {
-  var groups      = {};
-  var groupColors = {};
+  let groups      = {};
+  let groupHired  = {};
+  let groupColors = {};
 
-  var jobType = document.getElementById('job-type-switcher').value;
-  var knownLabelIds = [];
+  let jobType = document.getElementById('job-type-switcher').value;
+  let knownLabelIds = [];
   if (jobType === 'open') {
     knownLabelIds = Array.from(appData.openLabelIds);
   } else if (jobType === 'closed') {
@@ -442,8 +521,8 @@ function buildByJob(candidateCards) {
     knownLabelIds = Object.keys(appData.jobLabelNames);
   }
   knownLabelIds.forEach(function(id) {
-    var name  = appData.jobLabelNames[id];
-    var color = appData.jobLabelColors[id];
+    let name  = appData.jobLabelNames[id];
+    let color = appData.jobLabelColors[id];
     if (name) {
       groups[name]      = 0;
       groupColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
@@ -451,17 +530,20 @@ function buildByJob(candidateCards) {
   });
 
   candidateCards.forEach(function(card) {
+    let isHired = appData.hireListId !== null && card.idList === appData.hireListId;
     if (card.labels && card.labels.length > 0) {
       card.labels.forEach(function(label) {
-        var name  = label.name || ('(no name - ' + label.color + ')');
-        var color = label.color;
+        let name  = label.name || ('(no name - ' + label.color + ')');
+        let color = label.color;
         groups[name] = (groups[name] || 0) + 1;
+        if (isHired) groupHired[name] = (groupHired[name] || 0) + 1;
         if (!groupColors[name]) {
           groupColors[name] = color ? (TRELLO_LABEL_COLOURS[color] || COLOUR_NO_LABEL) : COLOUR_NO_LABEL;
         }
       });
     } else {
-      groups['Unassigned']      = (groups['Unassigned'] || 0) + 1;
+      groups['Unassigned'] = (groups['Unassigned'] || 0) + 1;
+      if (isHired) groupHired['Unassigned'] = (groupHired['Unassigned'] || 0) + 1;
       groupColors['Unassigned'] = COLOUR_UNASSIGNED;
     }
   });
@@ -472,6 +554,7 @@ function buildByJob(candidateCards) {
     groupsLabel: 'Open Jobs',
     totalCards:  candidateCards.length,
     groups:      groups,
+    groupHired:  groupHired,
     groupColors: groupColors
   };
 }
@@ -479,12 +562,12 @@ function buildByJob(candidateCards) {
 // ── Dashboard: Candidates per Stage (grouped by list name) ────────
 function buildByStage(candidateCards, listsMap) {
   // Pre-initialise every non-excluded list to 0 so empty lists still appear
-  var groups = {};
+  let groups = {};
   Object.keys(listsMap).forEach(function(id) {
     groups[listsMap[id]] = 0;
   });
   candidateCards.forEach(function(card) {
-    var listName = listsMap[card.idList] || 'Unknown';
+    let listName = listsMap[card.idList] || 'Unknown';
     groups[listName] = (groups[listName] || 0) + 1;
   });
   return {
@@ -498,15 +581,15 @@ function buildByStage(candidateCards, listsMap) {
 
 // ── Dashboard: Candidates per Job and Stage (stacked bar) ─────────
 function buildByJobAndStage(candidateCards, listsMap) {
-  var jobNames   = [];
-  var stageNames = [];
-  var jobSet     = {};
-  var stageSet   = {};
+  let jobNames   = [];
+  let stageNames = [];
+  let jobSet     = {};
+  let stageSet   = {};
 
   // Pre-initialize all known job labels from Open+Closed Jobs lists
   // so jobs with 0 matching candidates still appear
-  var jobType = document.getElementById('job-type-switcher').value;
-  var knownLabelIds = [];
+  let jobType = document.getElementById('job-type-switcher').value;
+  let knownLabelIds = [];
   if (jobType === 'open') {
     knownLabelIds = Array.from(appData.openLabelIds);
   } else if (jobType === 'closed') {
@@ -515,44 +598,44 @@ function buildByJobAndStage(candidateCards, listsMap) {
     knownLabelIds = Object.keys(appData.jobLabelNames);
   }
   knownLabelIds.forEach(function(id) {
-    var name = appData.jobLabelNames[id];
+    let name = appData.jobLabelNames[id];
     if (name && !jobSet[name]) { jobSet[name] = true; jobNames.push(name); }
   });
 
-  // First pass: collect jobs and stages from actual cards
-  candidateCards.forEach(function(card) {
-    var stageName = listsMap[card.idList] || 'Unknown';
-    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
-
-    var labels = (card.labels && card.labels.length > 0)
-      ? card.labels
-      : [{ name: 'Unassigned' }];
-
-    labels.forEach(function(label) {
-      var jobName = label.name || ('(no name - ' + label.color + ')');
-      if (!jobSet[jobName]) { jobSet[jobName] = true; jobNames.push(jobName); }
-    });
-  });
-
-  // Also include stages that have 0 cards (from listsMap)
+  // Stages in board list order (includes stages with 0 cards)
   Object.values(listsMap).forEach(function(stageName) {
     if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
   });
 
+  // First pass: collect jobs from actual cards
+  candidateCards.forEach(function(card) {
+    let stageName = listsMap[card.idList] || 'Unknown';
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+
+    let labels = (card.labels && card.labels.length > 0)
+      ? card.labels
+      : [{ name: 'Unassigned' }];
+
+    labels.forEach(function(label) {
+      let jobName = label.name || ('(no name - ' + label.color + ')');
+      if (!jobSet[jobName]) { jobSet[jobName] = true; jobNames.push(jobName); }
+    });
+  });
+
   // Build counts: counts[jobName][stageName] = n
-  var counts = {};
+  let counts = {};
   jobNames.forEach(function(job) {
     counts[job] = {};
     stageNames.forEach(function(stage) { counts[job][stage] = 0; });
   });
 
   candidateCards.forEach(function(card) {
-    var stageName = listsMap[card.idList] || 'Unknown';
-    var labels = (card.labels && card.labels.length > 0)
+    let stageName = listsMap[card.idList] || 'Unknown';
+    let labels = (card.labels && card.labels.length > 0)
       ? card.labels
       : [{ name: 'Unassigned' }];
     labels.forEach(function(label) {
-      var jobName = label.name || ('(no name - ' + label.color + ')');
+      let jobName = label.name || ('(no name - ' + label.color + ')');
       counts[jobName][stageName] = (counts[jobName][stageName] || 0) + 1;
     });
   });
@@ -571,51 +654,51 @@ function buildByJobAndStage(candidateCards, listsMap) {
 
 // ── Dashboard: Candidates per Member and Stage (stacked bar) ──────
 function buildByMemberAndStage(candidateCards, listsMap) {
-  var memberNames = [];
-  var stageNames  = [];
-  var memberSet   = {};
-  var stageSet    = {};
+  let memberNames = [];
+  let stageNames  = [];
+  let memberSet   = {};
+  let stageSet    = {};
 
   // Pre-initialize all board members so those with 0 candidates still appear
   (appData.boardMembers || []).forEach(function(m) {
-    var name = m.fullName || m.username || 'Unassigned';
+    let name = m.fullName || m.username || 'Unassigned';
     if (!memberSet[name]) { memberSet[name] = true; memberNames.push(name); }
   });
 
-  // First pass: collect stages and any members not on the board list
-  candidateCards.forEach(function(card) {
-    var stageName = listsMap[card.idList] || 'Unknown';
-    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
-
-    var members = (card.members && card.members.length > 0)
-      ? card.members
-      : [{ fullName: 'Unassigned' }];
-
-    members.forEach(function(m) {
-      var name = m.fullName || m.username || 'Unassigned';
-      if (!memberSet[name]) { memberSet[name] = true; memberNames.push(name); }
-    });
-  });
-
-  // Include all non-excluded stages even if 0 cards
+  // Stages in board list order (includes stages with 0 cards)
   Object.values(listsMap).forEach(function(stageName) {
     if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
   });
 
+  // First pass: collect any members not on the board list
+  candidateCards.forEach(function(card) {
+    let stageName = listsMap[card.idList] || 'Unknown';
+    if (!stageSet[stageName]) { stageSet[stageName] = true; stageNames.push(stageName); }
+
+    let members = (card.members && card.members.length > 0)
+      ? card.members
+      : [{ fullName: 'Unassigned' }];
+
+    members.forEach(function(m) {
+      let name = m.fullName || m.username || 'Unassigned';
+      if (!memberSet[name]) { memberSet[name] = true; memberNames.push(name); }
+    });
+  });
+
   // Build counts matrix
-  var counts = {};
+  let counts = {};
   memberNames.forEach(function(member) {
     counts[member] = {};
     stageNames.forEach(function(stage) { counts[member][stage] = 0; });
   });
 
   candidateCards.forEach(function(card) {
-    var stageName = listsMap[card.idList] || 'Unknown';
-    var members = (card.members && card.members.length > 0)
+    let stageName = listsMap[card.idList] || 'Unknown';
+    let members = (card.members && card.members.length > 0)
       ? card.members
       : [{ fullName: 'Unassigned' }];
     members.forEach(function(m) {
-      var name = m.fullName || m.username || 'Unassigned';
+      let name = m.fullName || m.username || 'Unassigned';
       counts[name][stageName] = (counts[name][stageName] || 0) + 1;
     });
   });
@@ -640,15 +723,15 @@ function renderStackedDashboard(config) {
   document.getElementById('stat-total').textContent        = config.totalCards;
   document.getElementById('stat-groups').textContent       = config.jobNames.length;
 
-  var totalGroups = config.jobNames.length;
-  var avg = totalGroups > 0 ? (config.totalCards / totalGroups).toFixed(1) : 0;
+  let totalGroups = config.jobNames.length;
+  let avg = totalGroups > 0 ? (config.totalCards / totalGroups).toFixed(1) : 0;
   document.getElementById('stat-avg').textContent = avg;
 
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
 
   // One dataset per stage
-  var datasets = config.stageNames.map(function(stage, i) {
-    var colour = COLOURS[i % COLOURS.length];
+  let datasets = config.stageNames.map(function(stage, i) {
+    let colour = COLOURS[i % COLOURS.length];
     return {
       label:           stage,
       data:            config.jobNames.map(function(job) { return config.counts[job][stage] || 0; }),
@@ -660,7 +743,7 @@ function renderStackedDashboard(config) {
     };
   });
 
-  var ctx = document.getElementById('myChart').getContext('2d');
+  let ctx = document.getElementById('myChart').getContext('2d');
   chartInstance = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -698,31 +781,35 @@ function renderStackedDashboard(config) {
   });
 
   // Build legend table: jobs as rows, stages as columns
-  var listEl = document.getElementById('item-list');
+  let listEl = document.getElementById('item-list');
   listEl.innerHTML = '';
 
-  var table = document.createElement('table');
-  table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;';
+  // Wrapper provides horizontal scrolling; first column stays fixed via position:sticky
+  let scrollWrap = document.createElement('div');
+  scrollWrap.style.cssText = 'overflow-x:auto;margin-top:8px;';
+
+  let table = document.createElement('table');
+  table.style.cssText = 'width:100%;border-collapse:separate;border-spacing:0;font-size:12px;';
 
   // Header row: empty corner + one column per stage
-  var thead = document.createElement('thead');
-  var headRow = document.createElement('tr');
+  let thead = document.createElement('thead');
+  let headRow = document.createElement('tr');
 
-  var cornerTh = document.createElement('th');
-  cornerTh.style.cssText = 'text-align:left;padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;white-space:nowrap;';
+  let cornerTh = document.createElement('th');
+  cornerTh.style.cssText = 'text-align:left;padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;background:#fff;';
   cornerTh.textContent = (config.groupsLabel || 'Job') + ' / Stage';
   headRow.appendChild(cornerTh);
 
   config.stageNames.forEach(function(stage, i) {
-    var th = document.createElement('th');
-    var colour = COLOURS[i % COLOURS.length];
+    let th = document.createElement('th');
+    let colour = COLOURS[i % COLOURS.length];
     th.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:2px solid ' + colour + ';color:' + colour + ';font-weight:600;white-space:nowrap;';
     th.textContent = stage;
     headRow.appendChild(th);
   });
 
   // Total column header
-  var totalTh = document.createElement('th');
+  let totalTh = document.createElement('th');
   totalTh.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:2px solid #172b4d;color:#172b4d;font-weight:600;';
   totalTh.textContent = 'Total';
   headRow.appendChild(totalTh);
@@ -731,28 +818,28 @@ function renderStackedDashboard(config) {
   table.appendChild(thead);
 
   // Body rows: one per job
-  var tbody = document.createElement('tbody');
+  let tbody = document.createElement('tbody');
   config.jobNames.forEach(function(job, rowIdx) {
-    var tr = document.createElement('tr');
+    let tr = document.createElement('tr');
     tr.style.background = rowIdx % 2 === 0 ? '#f8f9fc' : '#ffffff';
 
-    var jobTd = document.createElement('td');
-    jobTd.style.cssText = 'padding:6px 8px;font-weight:600;color:#172b4d;white-space:nowrap;border-bottom:1px solid #f0f0f0;';
+    let jobTd = document.createElement('td');
+    jobTd.style.cssText = 'padding:6px 8px;font-weight:600;color:#172b4d;white-space:nowrap;border-bottom:1px solid #f0f0f0;position:sticky;left:0;z-index:1;background:' + (rowIdx % 2 === 0 ? '#f8f9fc' : '#ffffff') + ';';
     jobTd.textContent = job;
     tr.appendChild(jobTd);
 
-    var jobTotal = 0;
+    let jobTotal = 0;
     config.stageNames.forEach(function(stage, i) {
-      var count = config.counts[job][stage] || 0;
+      let count = config.counts[job][stage] || 0;
       jobTotal += count;
-      var td = document.createElement('td');
+      let td = document.createElement('td');
       td.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;color:' + (count > 0 ? '#172b4d' : '#c1c7d0') + ';';
       td.textContent = count > 0 ? count : '—';
       tr.appendChild(td);
     });
 
     // Total cell
-    var totalTd = document.createElement('td');
+    let totalTd = document.createElement('td');
     totalTd.style.cssText = 'text-align:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-weight:700;color:#0052cc;background:#e8f0fe;';
     totalTd.textContent = jobTotal;
     tr.appendChild(totalTd);
@@ -761,34 +848,35 @@ function renderStackedDashboard(config) {
   });
 
   // Footer row: totals per stage
-  var footRow = document.createElement('tr');
+  let footRow = document.createElement('tr');
   footRow.style.background = '#f0f0f0';
 
-  var footLabelTd = document.createElement('td');
-  footLabelTd.style.cssText = 'padding:6px 8px;font-weight:700;color:#172b4d;border-top:2px solid #dfe1e6;';
+  let footLabelTd = document.createElement('td');
+  footLabelTd.style.cssText = 'padding:6px 8px;font-weight:700;color:#172b4d;border-top:2px solid #dfe1e6;position:sticky;left:0;z-index:1;background:#f0f0f0;';
   footLabelTd.textContent = 'Total';
   footRow.appendChild(footLabelTd);
 
-  var grandTotal = 0;
+  let grandTotal = 0;
   config.stageNames.forEach(function(stage) {
-    var stageTotal = config.jobNames.reduce(function(sum, job) {
+    let stageTotal = config.jobNames.reduce(function(sum, job) {
       return sum + (config.counts[job][stage] || 0);
     }, 0);
     grandTotal += stageTotal;
-    var td = document.createElement('td');
+    let td = document.createElement('td');
     td.style.cssText = 'text-align:center;padding:6px 8px;font-weight:700;color:#172b4d;border-top:2px solid #dfe1e6;';
     td.textContent = stageTotal;
     footRow.appendChild(td);
   });
 
-  var grandTd = document.createElement('td');
+  let grandTd = document.createElement('td');
   grandTd.style.cssText = 'text-align:center;padding:6px 8px;font-weight:800;color:#0052cc;background:#e8f0fe;border-top:2px solid #dfe1e6;';
   grandTd.textContent = grandTotal;
   footRow.appendChild(grandTd);
 
   tbody.appendChild(footRow);
   table.appendChild(tbody);
-  listEl.appendChild(table);
+  scrollWrap.appendChild(table);
+  listEl.appendChild(scrollWrap);
 
   t.sizeTo('#app').catch(function() {});
 }
@@ -796,8 +884,8 @@ function renderStackedDashboard(config) {
 
 // ── Dashboard 5: Hired vs. Remaining ──────────────────────────────
 function renderHiredVsRemaining() {
-  var jobType = document.getElementById('job-type-switcher').value;
-  var knownLabelIds = [];
+  let jobType = document.getElementById('job-type-switcher').value;
+  let knownLabelIds = [];
   if (jobType === 'open') {
     knownLabelIds = Array.from(appData.openLabelIds);
   } else if (jobType === 'closed') {
@@ -806,12 +894,12 @@ function renderHiredVsRemaining() {
     knownLabelIds = Object.keys(appData.jobLabelNames);
   }
 
-  var jobNames  = [];
-  var jobColors = {};
-  var seen      = {};
+  let jobNames  = [];
+  let jobColors = {};
+  let seen      = {};
   knownLabelIds.forEach(function(id) {
-    var name  = appData.jobLabelNames[id];
-    var color = appData.jobLabelColors[id];
+    let name  = appData.jobLabelNames[id];
+    let color = appData.jobLabelColors[id];
     if (name && !seen[name]) {
       seen[name]     = true;
       jobNames.push(name);
@@ -826,7 +914,7 @@ function renderHiredVsRemaining() {
   document.getElementById('stat-avg').textContent          = '—';
   document.getElementById('stat-total').textContent        = '—';
 
-  var listEl = document.getElementById('item-list');
+  let listEl = document.getElementById('item-list');
   listEl.innerHTML = '';
 
   if (!appData.restApiAuthorized) {
@@ -847,24 +935,24 @@ function renderHiredVsRemaining() {
     return;
   }
 
-  var cfData    = appData.customFieldData;
-  var totals    = jobNames.map(function(n) { return cfData[n] ? (cfData[n].total     || 0) : 0; });
-  var hired     = jobNames.map(function(n) { return cfData[n] ? (cfData[n].hired     || 0) : 0; });
-  var remaining = jobNames.map(function(n) { return cfData[n] ? (cfData[n].remaining || 0) : 0; });
+  let cfData    = appData.customFieldData;
+  let totals    = jobNames.map(function(n) { return cfData[n] ? (cfData[n].total     || 0) : 0; });
+  let hired     = jobNames.map(function(n) { return cfData[n] ? (cfData[n].hired     || 0) : 0; });
+  let remaining = jobNames.map(function(n) { return cfData[n] ? (cfData[n].remaining || 0) : 0; });
 
-  var grandTotal = totals.reduce(function(s, v) { return s + v; }, 0);
+  let grandTotal = totals.reduce(function(s, v) { return s + v; }, 0);
   document.getElementById('stat-total').textContent = grandTotal;
 
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-  var chartCtx = document.getElementById('myChart').getContext('2d');
+  let chartCtx = document.getElementById('myChart').getContext('2d');
 
-  var hiredBg = jobNames.map(function(n) {
+  let hiredBg = jobNames.map(function(n) {
     return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'fwd'), 'repeat');
   });
-  var remainingBg = jobNames.map(function(n) {
+  let remainingBg = jobNames.map(function(n) {
     return chartCtx.createPattern(makeStripeCanvas(jobColors[n], 'back'), 'repeat');
   });
-  var borderColors = jobNames.map(function(n) { return jobColors[n]; });
+  let borderColors = jobNames.map(function(n) { return jobColors[n]; });
 
   chartInstance = new Chart(chartCtx, {
     type: 'bar',
@@ -890,25 +978,25 @@ function renderHiredVsRemaining() {
   });
 
   // Summary table
-  var table = document.createElement('table');
+  let table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:16px;';
-  var thead = document.createElement('thead');
-  var headRow = document.createElement('tr');
+  let thead = document.createElement('thead');
+  let headRow = document.createElement('tr');
   [['Job','left'],['Total','center'],['Hired','center'],['Remaining','center']].forEach(function(col) {
-    var th = document.createElement('th');
+    let th = document.createElement('th');
     th.style.cssText = 'text-align:' + col[1] + ';padding:6px 8px;border-bottom:2px solid #dfe1e6;color:#6b778c;font-weight:600;';
     th.textContent = col[0];
     headRow.appendChild(th);
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
-  var tbody = document.createElement('tbody');
+  let tbody = document.createElement('tbody');
   jobNames.forEach(function(name, i) {
-    var tr = document.createElement('tr');
+    let tr = document.createElement('tr');
     tr.style.background = i % 2 === 0 ? '#f8f9fc' : '#ffffff';
-    var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
-    [[dot + name,'left',true],[totals[i],'center',false],[hired[i],'center',false],[remaining[i],'center',false]].forEach(function(cell) {
-      var td = document.createElement('td');
+    let dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
+    [[dot + escHtml(name),'left',true],[totals[i],'center',false],[hired[i],'center',false],[remaining[i],'center',false]].forEach(function(cell) {
+      let td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:' + cell[1] + ';';
       if (cell[2]) { td.innerHTML = cell[0]; } else { td.textContent = cell[0]; }
       tr.appendChild(td);
@@ -922,9 +1010,9 @@ function renderHiredVsRemaining() {
 
 // ── Time to Hire ──────────────────────────────────────────────────
 function renderTimeToHire() {
-  var canvas = document.getElementById('myChart');
-  var listEl = document.getElementById('item-list');
-  var ctx    = canvas.getContext('2d');
+  let canvas = document.getElementById('myChart');
+  let listEl = document.getElementById('item-list');
+  let ctx    = canvas.getContext('2d');
 
   // Clear previous chart
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
@@ -949,9 +1037,9 @@ function renderTimeToHire() {
     return;
   }
 
-  var jobType = document.getElementById('job-type-switcher').value;
-  var allTth  = appData.timeToHireData;
-  var data = allTth.filter(function(d) {
+  let jobType = document.getElementById('job-type-switcher').value;
+  let allTth  = appData.timeToHireData;
+  let data = allTth.filter(function(d) {
     if (jobType === 'all') return true;
     if (jobType === 'open')       return d.labelId && appData.openLabelIds.has(d.labelId);
     if (jobType === 'closed')     return d.labelId && appData.closedLabelIds.has(d.labelId);
@@ -966,27 +1054,27 @@ function renderTimeToHire() {
   }
 
   // Collect unique job names sorted
-  var jobOrder = [];
+  let jobOrder = [];
   data.forEach(function(d) { if (jobOrder.indexOf(d.job) === -1) jobOrder.push(d.job); });
   jobOrder.sort();
 
   // Beeswarm layout
-  var radius = 0.18;
-  var allPoints = [];
+  let radius = 0.18;
+  let allPoints = [];
   jobOrder.forEach(function(job, ji) {
-    var jobPoints = data
+    let jobPoints = data
       .filter(function(d) { return d.job === job; })
       .map(function(d) { return { baseX: ji, y: d.days, label: d.candidate, color: d.color, job: d.job }; });
     jobPoints.sort(function(a, b) { return a.y - b.y; });
-    var placed = [];
+    let placed = [];
     jobPoints.forEach(function(p) {
-      var bestX = p.baseX, found = false;
-      for (var step = 0; step <= 20 && !found; step++) {
-        var cands = step === 0 ? [p.baseX] : [p.baseX + step * radius, p.baseX - step * radius];
-        for (var ci = 0; ci < cands.length && !found; ci++) {
-          var tx = cands[ci];
-          var ok = placed.every(function(q) {
-            var dx = tx - q.x, dy = p.y - q.y;
+      let bestX = p.baseX, found = false;
+      for (let step = 0; step <= 20 && !found; step++) {
+        let cands = step === 0 ? [p.baseX] : [p.baseX + step * radius, p.baseX - step * radius];
+        for (let ci = 0; ci < cands.length && !found; ci++) {
+          let tx = cands[ci];
+          let ok = placed.every(function(q) {
+            let dx = tx - q.x, dy = p.y - q.y;
             return Math.sqrt(dx*dx + dy*dy) >= radius;
           });
           if (ok) { bestX = tx; found = true; }
@@ -998,12 +1086,12 @@ function renderTimeToHire() {
   });
 
   // Group points by color for datasets
-  var colorMap = {};
+  let colorMap = {};
   allPoints.forEach(function(p) {
     if (!colorMap[p.color]) colorMap[p.color] = [];
     colorMap[p.color].push(p);
   });
-  var datasets = Object.keys(colorMap).map(function(color) {
+  let datasets = Object.keys(colorMap).map(function(color) {
     return {
       data: colorMap[color].map(function(p) { return { x: p.x, y: p.y, label: p.label, job: p.job }; }),
       backgroundColor: color,
@@ -1015,7 +1103,7 @@ function renderTimeToHire() {
   });
 
   // Update stats
-  var avgDays = Math.round(data.reduce(function(s, d) { return s + d.days; }, 0) / data.length);
+  let avgDays = Math.round(data.reduce(function(s, d) { return s + d.days; }, 0) / data.length);
   document.getElementById('stat-total').textContent  = data.length;
   document.getElementById('stat-groups').textContent = jobOrder.length;
   document.getElementById('stat-avg').textContent    = avgDays + 'd';
@@ -1032,7 +1120,7 @@ function renderTimeToHire() {
           callbacks: {
             title: function() { return ''; },
             label: function(ctx) {
-              var r = ctx.raw;
+              let r = ctx.raw;
               return r.label + ' (' + r.job + '): ' + r.y + ' days';
             }
           }
@@ -1046,9 +1134,9 @@ function renderTimeToHire() {
           ticks: {
             stepSize: 1,
             callback: function(val) {
-              var i = Math.round(val);
+              let i = Math.round(val);
               if (Math.abs(val - i) < 0.01 && jobOrder[i] !== undefined) {
-                var name = jobOrder[i];
+                let name = jobOrder[i];
                 return name.length > 14 ? name.substring(0, 13) + '…' : name;
               }
               return '';
@@ -1068,9 +1156,9 @@ function renderTimeToHire() {
   });
 
   // ── Table ──
-  var table = document.createElement('table');
+  let table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;';
-  var thead = document.createElement('thead');
+  let thead = document.createElement('thead');
   thead.innerHTML = '<tr style="background:#f4f5f7;">' +
     '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dfe1e6;">Job</th>' +
     '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dfe1e6;">Candidate</th>' +
@@ -1078,15 +1166,15 @@ function renderTimeToHire() {
     '</tr>';
   table.appendChild(thead);
 
-  var tbody = document.createElement('tbody');
+  let tbody = document.createElement('tbody');
   // Sort by job then days
-  var sorted = data.slice().sort(function(a, b) {
+  let sorted = data.slice().sort(function(a, b) {
     return a.job < b.job ? -1 : a.job > b.job ? 1 : a.days - b.days;
   });
   sorted.forEach(function(row, i) {
-    var tr = document.createElement('tr');
+    let tr = document.createElement('tr');
     tr.style.background = i % 2 === 0 ? '#fff' : '#f9fafb';
-    var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + row.color + ';margin-right:6px;vertical-align:middle;"></span>';
+    let dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + row.color + ';margin-right:6px;vertical-align:middle;"></span>';
     tr.innerHTML =
       '<td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;">' + dot + escHtml(row.job) + '</td>' +
       '<td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;">' + escHtml(row.candidate) + '</td>' +
@@ -1104,9 +1192,9 @@ function escHtml(s) {
 
 // ── Expected Hires per Month ──────────────────────────────────────
 function renderExpectedHires() {
-  var canvas = document.getElementById('myChart');
-  var listEl = document.getElementById('item-list');
-  var ctx    = canvas.getContext('2d');
+  let canvas = document.getElementById('myChart');
+  let listEl = document.getElementById('item-list');
+  let ctx    = canvas.getContext('2d');
 
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   listEl.innerHTML = '';
@@ -1129,10 +1217,10 @@ function renderExpectedHires() {
     return;
   }
 
-  var jobType = document.getElementById('job-type-switcher').value;
+  let jobType = document.getElementById('job-type-switcher').value;
 
   // Pick which label IDs to include
-  var knownLabelIds = [];
+  let knownLabelIds = [];
   if (jobType === 'open') {
     knownLabelIds = Array.from(appData.openLabelIds);
   } else if (jobType === 'closed') {
@@ -1142,26 +1230,26 @@ function renderExpectedHires() {
   }
 
   // Days until end of year
-  var now     = new Date();
-  var endYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-  var daysLeft = Math.max(1, Math.round((endYear - now) / (1000 * 60 * 60 * 24)));
-  var DAYS_PER_MONTH = 30.417;
+  let now     = new Date();
+  let endYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  let daysLeft = Math.max(1, Math.round((endYear - now) / (1000 * 60 * 60 * 24)));
+  let DAYS_PER_MONTH = 30.417;
 
   // Build per-job data
-  var jobNames  = [];
-  var jobValues = {};
-  var jobColors = {};
-  var seen      = {};
+  let jobNames  = [];
+  let jobValues = {};
+  let jobColors = {};
+  let seen      = {};
 
   knownLabelIds.forEach(function(id) {
-    var name  = appData.jobLabelNames[id];
-    var color = appData.jobLabelColors[id];
+    let name  = appData.jobLabelNames[id];
+    let color = appData.jobLabelColors[id];
     if (!name || seen[name]) return;
     seen[name] = true;
 
-    var cf        = appData.customFieldData[name] || {};
-    var remaining = cf.remaining !== null && cf.remaining !== undefined ? cf.remaining : 0;
-    var velocity  = Math.round((remaining / daysLeft * DAYS_PER_MONTH) * 10) / 10; // 1 decimal
+    let cf        = appData.customFieldData[name] || {};
+    let remaining = cf.remaining !== null && cf.remaining !== undefined ? cf.remaining : 0;
+    let velocity  = Math.round((remaining / daysLeft * DAYS_PER_MONTH) * 10) / 10; // 1 decimal
 
     jobNames.push(name);
     jobValues[name] = velocity;
@@ -1171,7 +1259,7 @@ function renderExpectedHires() {
   // Sort by velocity descending
   jobNames.sort(function(a, b) { return jobValues[b] - jobValues[a]; });
 
-  var totalExpected = jobNames.reduce(function(s, n) { return s + jobValues[n]; }, 0);
+  let totalExpected = jobNames.reduce(function(s, n) { return s + jobValues[n]; }, 0);
   totalExpected = Math.round(totalExpected * 10) / 10;
 
   document.getElementById('stat-total').textContent  = totalExpected;
@@ -1217,7 +1305,7 @@ function renderExpectedHires() {
             font: { size: 11 },
             maxRotation: 30,
             callback: function(val, i) {
-              var name = jobNames[i] || '';
+              let name = jobNames[i] || '';
               return name.length > 16 ? name.substring(0, 15) + '…' : name;
             }
           },
@@ -1233,9 +1321,9 @@ function renderExpectedHires() {
   });
 
   // ── Table ──
-  var table = document.createElement('table');
+  let table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;';
-  var thead = document.createElement('thead');
+  let thead = document.createElement('thead');
   thead.innerHTML =
     '<tr style="background:#f4f5f7;">' +
     '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dfe1e6;">Job</th>' +
@@ -1244,13 +1332,13 @@ function renderExpectedHires() {
     '<th style="padding:8px 10px;text-align:right;border-bottom:2px solid #dfe1e6;">Expected Hires / Month</th>' +
     '</tr>';
   table.appendChild(thead);
-  var tbody = document.createElement('tbody');
+  let tbody = document.createElement('tbody');
   jobNames.forEach(function(name, i) {
-    var cf        = appData.customFieldData[name] || {};
-    var remaining = cf.remaining !== null && cf.remaining !== undefined ? cf.remaining : 0;
-    var tr = document.createElement('tr');
+    let cf        = appData.customFieldData[name] || {};
+    let remaining = cf.remaining !== null && cf.remaining !== undefined ? cf.remaining : 0;
+    let tr = document.createElement('tr');
     tr.style.background = i % 2 === 0 ? '#fff' : '#f9fafb';
-    var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
+    let dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + jobColors[name] + ';margin-right:6px;vertical-align:middle;"></span>';
     tr.innerHTML =
       '<td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;">' + dot + escHtml(name) + '</td>' +
       '<td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;text-align:right;">' + remaining + '</td>' +
@@ -1265,9 +1353,9 @@ function renderExpectedHires() {
 
 // ── Risk Alerts ───────────────────────────────────────────────────
 function renderRiskAlerts() {
-  var canvas = document.getElementById('myChart');
-  var listEl = document.getElementById('item-list');
-  var ctx    = canvas.getContext('2d');
+  let canvas = document.getElementById('myChart');
+  let listEl = document.getElementById('item-list');
+  let ctx    = canvas.getContext('2d');
 
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   listEl.innerHTML = '';
@@ -1290,8 +1378,8 @@ function renderRiskAlerts() {
     return;
   }
 
-  var jobType = document.getElementById('job-type-switcher').value;
-  var data = appData.riskAlertsData.filter(function(d) {
+  let jobType = document.getElementById('job-type-switcher').value;
+  let data = appData.riskAlertsData.filter(function(d) {
     if (jobType === 'all') return true;
     if (jobType === 'open')       return d.labelId && appData.openLabelIds.has(d.labelId);
     if (jobType === 'closed')     return d.labelId && appData.closedLabelIds.has(d.labelId);
@@ -1306,27 +1394,27 @@ function renderRiskAlerts() {
   }
 
   // Stage order = board list order (from riskAlertsStages)
-  var stageOrder = appData.riskAlertsStages;
+  let stageOrder = appData.riskAlertsStages;
 
   // Beeswarm layout
-  var radius = 0.18;
-  var allPoints = [];
+  let radius = 0.18;
+  let allPoints = [];
 
   stageOrder.forEach(function(stage, si) {
-    var stagePoints = data
+    let stagePoints = data
       .filter(function(d) { return d.stage === stage; })
       .map(function(d) { return { baseX: si, y: d.days, label: d.candidate, color: d.color, job: d.job, lastAction: d.lastAction }; });
     stagePoints.sort(function(a, b) { return a.y - b.y; });
 
-    var placed = [];
+    let placed = [];
     stagePoints.forEach(function(p) {
-      var bestX = p.baseX, found = false;
-      for (var step = 0; step <= 20 && !found; step++) {
-        var cands = step === 0 ? [p.baseX] : [p.baseX + step * radius, p.baseX - step * radius];
-        for (var ci = 0; ci < cands.length && !found; ci++) {
-          var tx = cands[ci];
-          var ok = placed.every(function(q) {
-            var dx = tx - q.x, dy = p.y - q.y;
+      let bestX = p.baseX, found = false;
+      for (let step = 0; step <= 20 && !found; step++) {
+        let cands = step === 0 ? [p.baseX] : [p.baseX + step * radius, p.baseX - step * radius];
+        for (let ci = 0; ci < cands.length && !found; ci++) {
+          let tx = cands[ci];
+          let ok = placed.every(function(q) {
+            let dx = tx - q.x, dy = p.y - q.y;
             return Math.sqrt(dx*dx + dy*dy) >= radius;
           });
           if (ok) { bestX = tx; found = true; }
@@ -1338,12 +1426,12 @@ function renderRiskAlerts() {
   });
 
   // Group by color for Chart.js datasets
-  var colorMap = {};
+  let colorMap = {};
   allPoints.forEach(function(p) {
     if (!colorMap[p.color]) colorMap[p.color] = [];
     colorMap[p.color].push(p);
   });
-  var datasets = Object.keys(colorMap).map(function(color) {
+  let datasets = Object.keys(colorMap).map(function(color) {
     return {
       data: colorMap[color].map(function(p) {
         return { x: p.x, y: p.y, label: p.label, job: p.job, lastAction: p.lastAction };
@@ -1357,7 +1445,7 @@ function renderRiskAlerts() {
   });
 
   // Update stats
-  var avgDays = Math.round(data.reduce(function(s, d) { return s + d.days; }, 0) / data.length);
+  let avgDays = Math.round(data.reduce(function(s, d) { return s + d.days; }, 0) / data.length);
   document.getElementById('stat-total').textContent  = data.length;
   document.getElementById('stat-groups').textContent = stageOrder.length;
   document.getElementById('stat-avg').textContent    = avgDays + 'd';
@@ -1374,7 +1462,7 @@ function renderRiskAlerts() {
           callbacks: {
             title: function() { return ''; },
             label: function(ctx) {
-              var r = ctx.raw;
+              let r = ctx.raw;
               return [
                 r.job + ' — ' + r.label,
                 'Days in pipeline: ' + r.y,
@@ -1392,9 +1480,9 @@ function renderRiskAlerts() {
           ticks: {
             stepSize: 1,
             callback: function(val) {
-              var i = Math.round(val);
+              let i = Math.round(val);
               if (Math.abs(val - i) < 0.01 && stageOrder[i] !== undefined) {
-                var name = stageOrder[i];
+                let name = stageOrder[i];
                 return name.length > 14 ? name.substring(0, 13) + '…' : name;
               }
               return '';
@@ -1414,9 +1502,9 @@ function renderRiskAlerts() {
   });
 
   // ── Table ──
-  var table = document.createElement('table');
+  let table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;';
-  var thead = document.createElement('thead');
+  let thead = document.createElement('thead');
   thead.innerHTML =
     '<tr style="background:#f4f5f7;">' +
     '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dfe1e6;">Job</th>' +
@@ -1427,13 +1515,13 @@ function renderRiskAlerts() {
     '</tr>';
   table.appendChild(thead);
 
-  var tbody = document.createElement('tbody');
+  let tbody = document.createElement('tbody');
   // Sort by days descending (most at-risk first)
-  var sorted = data.slice().sort(function(a, b) { return b.days - a.days; });
+  let sorted = data.slice().sort(function(a, b) { return b.days - a.days; });
   sorted.forEach(function(row, i) {
-    var tr = document.createElement('tr');
+    let tr = document.createElement('tr');
     tr.style.background = i % 2 === 0 ? '#fff' : '#f9fafb';
-    var dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + row.color + ';margin-right:6px;vertical-align:middle;"></span>';
+    let dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + row.color + ';margin-right:6px;vertical-align:middle;"></span>';
     // Highlight rows with >30 days in pipeline
     if (row.days > 30) tr.style.background = i % 2 === 0 ? '#fff8f0' : '#fff3e6';
     tr.innerHTML =
@@ -1453,8 +1541,8 @@ function switchDashboard(view, jobType) {
   if (!appData) return;
 
   // Hide "Unassigned Candidates" for job-level dashboards
-  var noUnassignedViews = ['hired-vs-remaining', 'expected-hires'];
-  var unassignedOpt = document.querySelector('#job-type-switcher option[value="unassigned"]');
+  let noUnassignedViews = ['hired-vs-remaining', 'expected-hires'];
+  let unassignedOpt = document.querySelector('#job-type-switcher option[value="unassigned"]');
   if (unassignedOpt) {
     unassignedOpt.hidden = noUnassignedViews.indexOf(view) !== -1;
   }
@@ -1481,7 +1569,7 @@ function switchDashboard(view, jobType) {
     renderRiskAlerts();
     return;
   }
-  var cards = filterCandidateCards(jobType);
+  let cards = filterCandidateCards(jobType);
   if (view === 'by-job-and-stage') {
     renderStackedDashboard(buildByJobAndStage(cards, appData.listsMap));
   } else if (view === 'by-member-and-stage') {
@@ -1509,24 +1597,24 @@ t.render(function() {
     t.cards('id', 'name', 'labels', 'idList', 'members')
   ])
   .then(function(results) {
-    var board    = results[0];
-    var lists    = results[1];
-    var allCards = results[2];
+    let board    = results[0];
+    let lists    = results[1];
+    let allCards = results[2];
 
     document.getElementById('board-name').textContent = board.name;
 
-    var excludedIds = new Set(
+    let excludedIds = new Set(
       lists.filter(function(l) { return EXCLUDED_LISTS.indexOf(l.name.trim().toLowerCase()) !== -1; })
            .map(function(l) { return l.id; })
     );
 
-    var openJobsList   = lists.find(function(l) { return l.name.trim().toLowerCase() === 'open jobs'; });
-    var closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
+    let openJobsList   = lists.find(function(l) { return l.name.trim().toLowerCase() === 'open jobs'; });
+    let closedJobsList = lists.find(function(l) { return l.name.trim().toLowerCase() === 'closed jobs'; });
 
-    var openLabelIds   = new Set();
-    var closedLabelIds = new Set();
-    var jobLabelNames  = {};
-    var jobLabelColors = {};
+    let openLabelIds   = new Set();
+    let closedLabelIds = new Set();
+    let jobLabelNames  = {};
+    let jobLabelColors = {};
 
     function collectLabels(card, targetSet) {
       (card.labels || []).forEach(function(l) {
@@ -1539,13 +1627,19 @@ t.render(function() {
     if (openJobsList)   allCards.filter(function(c) { return c.idList === openJobsList.id; }).forEach(function(c) { collectLabels(c, openLabelIds); });
     if (closedJobsList) allCards.filter(function(c) { return c.idList === closedJobsList.id; }).forEach(function(c) { collectLabels(c, closedLabelIds); });
 
-    var listsMap = {};
+    let listsMap = {};
     lists.forEach(function(l) { if (!excludedIds.has(l.id)) listsMap[l.id] = l.name; });
 
-    var allCandidateCards = allCards.filter(function(c) { return !excludedIds.has(c.idList); });
+    let allCandidateCards = allCards.filter(function(c) { return !excludedIds.has(c.idList); });
+
+    let hiredList = lists.find(function(l) {
+      let n = l.name.trim().toLowerCase();
+      return n === 'hire' || n === 'hired';
+    });
 
     appData = {
       allCandidateCards:  allCandidateCards,
+      hireListId:         hiredList ? hiredList.id : null,
       listsMap:           listsMap,
       openLabelIds:       openLabelIds,
       closedLabelIds:     closedLabelIds,
@@ -1568,62 +1662,106 @@ t.render(function() {
     t.sizeTo('#app').catch(function() {});
 
     // ── Async: fetch custom fields via REST API ──────────────
-    var restApi = t.getRestApi();
+    let restApi = t.getRestApi();
     restApi.isAuthorized().then(function(isAuthorized) {
       appData.restApiAuthorized = isAuthorized;
       if (!isAuthorized) return;
 
       // getRestApi() only provides auth helpers — use getToken() + fetch() for actual calls
       return restApi.getToken().then(function(token) {
-        var key  = '8b05c6c33e07f45582b9d6bcfa9d5e17';
-        var base = 'https://api.trello.com';
+        let key  = '8b05c6c33e07f45582b9d6bcfa9d5e17';
+        let base = 'https://api.trello.com';
 
-        function apiFetch(path) {
-          var sep = path.indexOf('?') === -1 ? '?' : '&';
-          var url = base + path + sep + 'key=' + key + '&token=' + token;
+        function apiFetch(path, attempt) {
+          let sep = path.indexOf('?') === -1 ? '?' : '&';
+          let url = base + path + sep + 'key=' + key + '&token=' + token;
           return fetch(url).then(function(r) {
+            if (r.status === 429) {
+              // Rate limited — wait (Retry-After if readable, else backoff) and retry
+              attempt = attempt || 0;
+              if (attempt >= 4) throw new Error('Trello API 429: rate limit exceeded');
+              let retryAfter = parseFloat(r.headers.get('Retry-After'));
+              let waitMs = !isNaN(retryAfter)
+                ? retryAfter * 1000
+                : Math.min(1000 * Math.pow(2, attempt + 1), 10000);
+              return new Promise(function(resolve) { setTimeout(resolve, waitMs); })
+                .then(function() { return apiFetch(path, attempt + 1); });
+            }
             if (!r.ok) {
               return r.text().then(function(txt) {
-                throw new Error('Trello API ' + r.status + ': ' + txt);
+                let err = new Error('Trello API ' + r.status + ': ' + txt);
+                // 401 = token missing/revoked; 400 "invalid token" = same.
+                // isAuthorized() only checks local storage, so a token revoked
+                // server-side still reads as authorized until a call actually fails.
+                if (r.status === 401 || (r.status === 400 && /invalid token/i.test(txt))) {
+                  err.isAuthError = true;
+                }
+                throw err;
               });
             }
             return r.json();
           });
         }
 
+        // Run promise-returning tasks a few at a time to stay under Trello's
+        // rate limit (~100 requests / 10 s per token)
+        function runLimited(tasks, limit) {
+          let results = new Array(tasks.length);
+          let next = 0;
+          function worker() {
+            if (next >= tasks.length) return Promise.resolve();
+            let i = next++;
+            return tasks[i]().then(function(res) { results[i] = res; }).then(worker);
+          }
+          let workers = [];
+          for (let w = 0; w < Math.min(limit, tasks.length); w++) workers.push(worker());
+          return Promise.all(workers).then(function() { return results; });
+        }
+
+        // Per-card action fetch that never rejects: a card whose history can't
+        // be loaded is skipped instead of breaking the whole dashboard
+        function fetchCardActions(card, filter) {
+          return apiFetch('/1/cards/' + card.id + '/actions?filter=' + filter)
+            .then(function(actions) { return { card: card, actions: actions }; })
+            .catch(function(err) {
+              console.warn('HR Dashboard: could not load actions for card "' + card.name + '" -', err);
+              return { card: card, actions: [] };
+            });
+        }
+
         return Promise.all([
           apiFetch('/1/boards/' + board.id + '/customFields'),
           apiFetch('/1/boards/' + board.id + '/cards?customFieldItems=true&fields=id,idList,labels')
         ]).then(function(cfResults) {
-          var fieldDefs = cfResults[0];
-          var cfCards   = cfResults[1];
+          let fieldDefs = cfResults[0];
+          let cfCards   = cfResults[1];
 
           function findFieldId(name) {
-            var f = fieldDefs.find(function(d) { return d.name.trim().toLowerCase() === name.toLowerCase(); });
+            let f = fieldDefs.find(function(d) { return d.name.trim().toLowerCase() === name.toLowerCase(); });
             return f ? f.id : null;
           }
-          var fTotal     = findFieldId('Total');
-          var fHired     = findFieldId('Hired');
-          var fRemaining = findFieldId('Remaining');
+          let fTotal     = findFieldId('Total');
+          let fHired     = findFieldId('Hired');
+          let fRemaining = findFieldId('Remaining');
 
-          var jobListIds = new Set();
+          let jobListIds = new Set();
           if (openJobsList)   jobListIds.add(openJobsList.id);
           if (closedJobsList) jobListIds.add(closedJobsList.id);
 
-          var cfData = {};
+          let cfData = {};
           cfCards.forEach(function(card) {
             if (!jobListIds.has(card.idList)) return;
-            var items = card.customFieldItems || [];
+            let items = card.customFieldItems || [];
             function getVal(fieldId) {
               if (!fieldId) return null;
-              var item = items.find(function(i) { return i.idCustomField === fieldId; });
+              let item = items.find(function(i) { return i.idCustomField === fieldId; });
               if (!item || !item.value) return null;
-              var n = parseFloat(item.value.number !== undefined ? item.value.number : item.value.text);
+              let n = parseFloat(item.value.number !== undefined ? item.value.number : item.value.text);
               return isNaN(n) ? null : n;
             }
-            var total = getVal(fTotal), hired = getVal(fHired), remaining = getVal(fRemaining);
+            let total = getVal(fTotal), hired = getVal(fHired), remaining = getVal(fRemaining);
             (card.labels || []).forEach(function(l) {
-              var name = l.name || ('(no name - ' + l.color + ')');
+              let name = l.name || ('(no name - ' + l.color + ')');
               if (!cfData[name]) cfData[name] = { total: null, hired: null, remaining: null };
               if (total     !== null) cfData[name].total     = (cfData[name].total     || 0) + total;
               if (hired     !== null) cfData[name].hired     = (cfData[name].hired     || 0) + hired;
@@ -1639,58 +1777,59 @@ t.render(function() {
           if (document.getElementById('dashboard-switcher').value === 'expected-hires') {
             renderExpectedHires();
           }
+          if (document.getElementById('dashboard-switcher').value === 'by-job') {
+            switchDashboard('by-job');
+          }
 
           // ── Time to Hire card actions ──────────────────────────
-          var hireList  = lists.find(function(l) { return l.name.trim().toLowerCase() === 'hire'; });
-          var hireCards = hireList ? allCards.filter(function(c) { return c.idList === hireList.id; }) : [];
+          let hireList  = lists.find(function(l) { return l.name.trim().toLowerCase() === 'hire'; });
+          let hireCards = hireList ? allCards.filter(function(c) { return c.idList === hireList.id; }) : [];
 
-          var tthPromise = hireCards.length === 0
-            ? Promise.resolve([])
-            : Promise.all(hireCards.map(function(card) {
-                return apiFetch('/1/cards/' + card.id + '/actions?filter=updateCard:idList,createCard')
-                  .then(function(actions) { return { card: card, actions: actions }; });
-              }));
+          let tthPromise = runLimited(hireCards.map(function(card) {
+            return function() {
+              return fetchCardActions(card, 'updateCard:idList,createCard');
+            };
+          }), 3);
 
           // ── Risk Alerts card actions ───────────────────────────
-          var pubIdx  = lists.findIndex(function(l) { return l.name.trim().toLowerCase() === 'published candidates'; });
-          var hireIdx = lists.findIndex(function(l) { return l.name.trim().toLowerCase() === 'hire'; });
-          var stageLists = (pubIdx !== -1 && hireIdx !== -1 && pubIdx < hireIdx)
+          let pubIdx  = lists.findIndex(function(l) { return l.name.trim().toLowerCase() === 'published candidates'; });
+          let hireIdx = lists.findIndex(function(l) { return l.name.trim().toLowerCase() === 'hire'; });
+          let stageLists = (pubIdx !== -1 && hireIdx !== -1 && pubIdx < hireIdx)
             ? lists.slice(pubIdx, hireIdx) : [];
-          var stageListIds  = new Set(stageLists.map(function(l) { return l.id; }));
+          let stageListIds  = new Set(stageLists.map(function(l) { return l.id; }));
           appData.riskAlertsStages = stageLists.map(function(l) { return l.name; });
 
-          var pipelineCards = allCards.filter(function(c) { return stageListIds.has(c.idList); });
+          let pipelineCards = allCards.filter(function(c) { return stageListIds.has(c.idList); });
 
-          var raPromise = pipelineCards.length === 0
-            ? Promise.resolve([])
-            : Promise.all(pipelineCards.map(function(card) {
-                return apiFetch('/1/cards/' + card.id + '/actions?filter=updateCard:idList,createCard,commentCard,addMemberToCard,updateCard:due&limit=100')
-                  .then(function(actions) { return { card: card, actions: actions }; });
-              }));
+          let raPromise = runLimited(pipelineCards.map(function(card) {
+            return function() {
+              return fetchCardActions(card, 'updateCard:idList,createCard,commentCard,addMemberToCard,updateCard:due&limit=100');
+            };
+          }), 3);
 
           // ── Process both in parallel ───────────────────────────
           return Promise.all([tthPromise, raPromise]).then(function(both) {
-            var tthResults = both[0];
-            var raResults  = both[1];
+            let tthResults = both[0];
+            let raResults  = both[1];
 
             // --- Time to Hire ---
-            var tthData = [];
+            let tthData = [];
             tthResults.forEach(function(r) {
-              var card = r.card, actions = r.actions;
-              var pubTs = null, hireTs = null;
+              let card = r.card, actions = r.actions;
+              let pubTs = null, hireTs = null;
               actions.forEach(function(a) {
-                var d = a.data || {};
-                var listAfter = (d.listAfter || {}).name || '';
-                var listName  = (d.list      || {}).name || '';
-                var ts = new Date(a.date).getTime();
+                let d = a.data || {};
+                let listAfter = (d.listAfter || {}).name || '';
+                let listName  = (d.list      || {}).name || '';
+                let ts = new Date(a.date).getTime();
                 if (listAfter.trim().toLowerCase() === 'hire' && hireTs === null) hireTs = ts;
                 if (listAfter.trim().toLowerCase() === 'published candidates' || listName.trim().toLowerCase() === 'published candidates') {
                   if (pubTs === null || ts < pubTs) pubTs = ts;
                 }
               });
               if (pubTs === null || hireTs === null) return;
-              var days     = Math.abs(Math.round((hireTs - pubTs) / (1000 * 60 * 60 * 24)));
-              var jobLabel = (card.labels && card.labels.length > 0) ? card.labels[0] : null;
+              let days     = Math.abs(Math.round((hireTs - pubTs) / (1000 * 60 * 60 * 24)));
+              let jobLabel = (card.labels && card.labels.length > 0) ? card.labels[0] : null;
               tthData.push({
                 job:      jobLabel ? (jobLabel.name || '(no label)') : '(no label)',
                 candidate: card.name,
@@ -1704,11 +1843,11 @@ t.render(function() {
             if (document.getElementById('dashboard-switcher').value === 'time-to-hire') renderTimeToHire();
 
             // --- Risk Alerts ---
-            var now    = Date.now();
-            var raData = [];
+            let now    = Date.now();
+            let raData = [];
 
             function actionLabel(a) {
-              var d = a.data || {}, tp = a.type;
+              let d = a.data || {}, tp = a.type;
               if (tp === 'createCard')      return 'Card created';
               if (tp === 'commentCard')     return 'Comment added';
               if (tp === 'addMemberToCard') return 'Member assigned';
@@ -1721,26 +1860,26 @@ t.render(function() {
             }
 
             raResults.forEach(function(r) {
-              var card = r.card, actions = r.actions;
-              var pubTs = null;
+              let card = r.card, actions = r.actions;
+              let pubTs = null;
               actions.forEach(function(a) {
-                var d = a.data || {};
-                var listAfter = (d.listAfter || {}).name || '';
-                var listName  = (d.list      || {}).name || '';
-                var ts = new Date(a.date).getTime();
+                let d = a.data || {};
+                let listAfter = (d.listAfter || {}).name || '';
+                let listName  = (d.list      || {}).name || '';
+                let ts = new Date(a.date).getTime();
                 if (listAfter.trim().toLowerCase() === 'published candidates' || listName.trim().toLowerCase() === 'published candidates') {
                   if (pubTs === null || ts < pubTs) pubTs = ts;
                 }
               });
               if (pubTs === null) return;
 
-              var daysInPipeline = Math.round((now - pubTs) / (1000 * 60 * 60 * 24));
-              var lastAction     = actions.length > 0 ? actions[0] : null;
-              var lastActionText = lastAction
+              let daysInPipeline = Math.round((now - pubTs) / (1000 * 60 * 60 * 24));
+              let lastAction     = actions.length > 0 ? actions[0] : null;
+              let lastActionText = lastAction
                 ? actionLabel(lastAction) + ' on ' + new Date(lastAction.date).toLocaleDateString()
                 : '—';
-              var listObj  = lists.find(function(l) { return l.id === card.idList; });
-              var jobLabel = (card.labels && card.labels.length > 0) ? card.labels[0] : null;
+              let listObj  = lists.find(function(l) { return l.id === card.idList; });
+              let jobLabel = (card.labels && card.labels.length > 0) ? card.labels[0] : null;
               raData.push({
                 job:        jobLabel ? (jobLabel.name || '(no label)') : '(no label)',
                 candidate:  card.name,
@@ -1760,6 +1899,16 @@ t.render(function() {
       }); // end getToken
     }).catch(function(err) {
       console.warn('HR Dashboard: custom fields not loaded -', err);
+      // A revoked/expired token throws mid-fetch while restApiAuthorized is
+      // still true. Flip it so the REST-backed dashboards drop their stale
+      // "Loading…" state and show the reauthorize prompt instead.
+      if (err && err.isAuthError) {
+        appData.restApiAuthorized = false;
+      }
+      appData.customFieldsReady = false;
+      appData.timeToHireReady   = false;
+      appData.riskAlertsReady   = false;
+      switchDashboard(document.getElementById('dashboard-switcher').value);
     });
   })
   .catch(function(err) {

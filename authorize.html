@@ -41,43 +41,117 @@
     }
     button:hover { background: #0747a6; }
     .status { margin-top: 14px; font-size: 12px; color: #6b778c; min-height: 18px; }
+    .status.error { color: #ca3521; font-weight: 600; }
+
+    /* Success confirmation banner (shown after authorization) */
+    .banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: #e3fcef;
+      border: 1px solid #79f2c0;
+      color: #006644;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-top: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: left;
+    }
+    .banner.show { display: flex; }
+    .banner .check {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: #36b37e;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">🔑</div>
   <h1>Authorize HR Dashboard</h1>
-  <p>
+  <p id="intro">
     To load <strong>Hired vs. Remaining</strong> data, the Power-Up needs
     permission to read custom fields from your Trello board.
   </p>
   <button id="auth-btn">Authorize with Trello</button>
   <div class="status" id="status"></div>
+  <div class="banner" id="banner">
+    <span class="check">✓</span>
+    <span>Authorized! The dashboard can now read your board data — you can close this window.</span>
+  </div>
 </div>
 
 <script>
-  var t = window.TrelloPowerUp.iframe({
+  const t = window.TrelloPowerUp.iframe({
     appKey:  '8b05c6c33e07f45582b9d6bcfa9d5e17',
-    appName: 'HR Dashboard'
+    appName: 'HR Dashboard v8'
   });
 
-  document.getElementById('auth-btn').addEventListener('click', function() {
-    var btn    = document.getElementById('auth-btn');
-    var status = document.getElementById('status');
+  // Named statusEl, not status: a global `status` binding shadows/clashes with
+  // window.status (a string property), which bit us when this was a `var`.
+  const btn      = document.getElementById('auth-btn');
+  const statusEl = document.getElementById('status');
+  const banner   = document.getElementById('banner');
+  const intro    = document.getElementById('intro');
+
+  function showAuthorized() {
+    intro.style.display  = 'none';
+    btn.style.display    = 'none';
+    statusEl.textContent = '';
+    banner.classList.add('show');
+  }
+
+  function showDenied(msg) {
+    statusEl.textContent = msg;
+    statusEl.classList.add('error');
+    btn.textContent = 'Authorize with Trello';
+    btn.disabled    = false;
+  }
+
+  btn.addEventListener('click', function() {
     btn.textContent    = 'Authorizing…';
     btn.disabled       = true;
-    status.textContent = '';
+    statusEl.textContent = '';
+    statusEl.classList.remove('error');
 
-    // t.getRestApi() returns the object directly — call .authorize() on it
-    t.getRestApi().authorize({ scope: 'read', expiration: 'never' })
+    const restApi = t.getRestApi();
+    const key     = '8b05c6c33e07f45582b9d6bcfa9d5e17';
+
+    // Clear any previously stored token FIRST so the result reflects only this
+    // attempt (authorize() resolves even on "Deny").
+    restApi.clearToken()
       .then(function() {
-        status.textContent = '✅ Authorized! You can close this window.';
-        btn.textContent    = 'Done';
+        return restApi.authorize({ scope: 'read', expiration: '30days' });
+      })
+      .then(function() {
+        return restApi.getToken();
+      })
+      .then(function(token) {
+        // isAuthorized() only checks the LOCAL token store, which can read as
+        // "authorized" even when the server granted nothing (e.g. after Deny),
+        // which is why Settings → Applications shows no token. Validate the
+        // token against the server so the banner matches reality.
+        if (!token) return false;
+        return fetch('https://api.trello.com/1/members/me?fields=id&key=' + key + '&token=' + token)
+          .then(function(r) { return r.ok; });
+      })
+      .then(function(valid) {
+        if (valid) {
+          showAuthorized();
+        } else {
+          showDenied('❌ Authorization was denied. Please try again.');
+        }
       })
       .catch(function(err) {
-        status.textContent = '❌ Authorization failed. Please try again.';
-        btn.textContent    = 'Authorize with Trello';
-        btn.disabled       = false;
+        showDenied('❌ Authorization failed. Please try again.');
         console.error(err);
       });
   });
